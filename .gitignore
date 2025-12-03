@@ -1,0 +1,14 @@
+node_modules
+
+# Ignore secrets and local env
+.env
+.env.local
+backend/.env
+
+# Ignore Expo/outputs and logs at repo root (mobile-app has its own .gitignore)
+mobile-app/.expo/
+*.log
+
+# Ignore local binaries/archives
+ngrok.exe
+ngrok.zip
