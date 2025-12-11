@@ -1,0 +1,42 @@
+{
+  "name": "tcc-unico",
+  "version": "1.0.0",
+  "description": "Sistema de Leitura Digital - TCC UNICO",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "mobile-app"
+  ],
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:mobile": "cd mobile-app && npx expo start --port 8084 --clear",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:mobile\"",
+    "dev:backend:3001": "cd backend && set PORT=3001 && npm run dev",
+    "dev:alt": "concurrently \"npm run dev:backend:3001\" \"npm run dev:mobile\"",
+    "install:all": "npm install && cd backend && npm install && cd ../mobile-app && npm install",
+    "build:backend": "cd backend && npm run build",
+    "test:backend": "cd backend && npm test",
+    "start:backend": "cd backend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^7.6.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  },
+  "keywords": [
+    "reading",
+    "digital",
+    "books",
+    "mobile",
+    "backend",
+    "api"
+  ],
+  "author": "Matheus Viana",
+  "license": "MIT"
+}
