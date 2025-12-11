@@ -87,7 +87,7 @@ function splitFixed(raw, chunkSize = 1200) {
   return chapters;
 }
 
-router.get('/search', authenticateToken, async (req, res) => {
+router.get('/search', async (req, res) => {
   try {
     const { query = '', page = 1 } = req.query;
     const url = '/books/';
@@ -113,7 +113,7 @@ router.get('/search', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const response = await gutendexAPI.get(`/books/${req.params.id}`);
     const book = normalizeGutendexBook(response.data);
@@ -125,7 +125,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/:id/content', authenticateToken, async (req, res) => {
+router.get('/:id/content', async (req, res) => {
   try {
     const response = await gutendexAPI.get(`/books/${req.params.id}`);
     const book = normalizeGutendexBook(response.data);

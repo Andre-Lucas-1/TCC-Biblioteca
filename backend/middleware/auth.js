@@ -1,10 +1,10 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-// Gerar token JWT
-const generateToken = (userId) => {
+// Gerar token JWT com payload completo (sem dependência de User local)
+const generateToken = (payload) => {
   return jwt.sign(
-    { userId },
+    payload,
     process.env.JWT_SECRET || 'your-secret-key',
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
@@ -25,26 +25,23 @@ const authenticateToken = async (req, res, next) => {
     
     // Verificar e decodificar o token
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    
-    // Buscar usuário no banco de dados
-    const user = await User.findById(decoded.userId);
-    
-    if (!user) {
-      return res.status(401).json({ 
-        message: 'Usuário não encontrado',
-        code: 'USER_NOT_FOUND'
-      });
+    // Encontrar ou criar usuário local mínimo para funcionalidades (progresso/gamificação)
+    const email = decoded.email;
+    let user = null;
+    if (email) {
+      user = await User.findOne({ email });
+      if (!user) {
+        user = new User({
+          name: decoded.name || email.split('@')[0],
+          email,
+          userType: decoded.userType || 'user',
+          isActive: true
+        });
+        await user.save();
+      }
     }
-    
-    if (!user.isActive) {
-      return res.status(401).json({ 
-        message: 'Conta desativada',
-        code: 'ACCOUNT_DISABLED'
-      });
-    }
-    
-    // Adicionar usuário ao request
-    req.user = user;
+    req.user = user || decoded;
+    if (!req.user._id && decoded.userId) req.user._id = decoded.userId;
     next();
     
   } catch (error) {

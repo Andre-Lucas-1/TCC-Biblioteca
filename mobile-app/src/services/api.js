@@ -14,7 +14,7 @@ const API_BASE_URL = __DEV__
 // Criar instância do axios
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
     'ngrok-skip-browser-warning': 'true',
@@ -253,11 +253,9 @@ export const apiUtils = {
   // Função para fazer logout e limpar dados
   logout: async () => {
     try {
-      await authAPI.logout();
-    } catch (error) {
-      console.error('Erro ao fazer logout:', error);
-    } finally {
       await AsyncStorage.multiRemove(['authToken', 'refreshToken', 'userData']);
+    } catch (error) {
+      console.error('Erro ao limpar storage:', error);
     }
   },
   

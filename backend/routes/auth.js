@@ -1,9 +1,35 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const axios = require('axios');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const { generateToken, authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
+const EXTERNAL_AUTH_BASE_URL = process.env.EXTERNAL_AUTH_BASE_URL || 'https://banco-z4ar.onrender.com';
+const externalAuth = axios.create({ baseURL: EXTERNAL_AUTH_BASE_URL, timeout: 30000 });
+// Cache em memória para reduzir dependência de listagem lenta no serviço externo
+const externalCache = new Map(); // key: email, value: { name, email, passwordHash }
+
+async function findExternalUserByEmail(email) {
+  try {
+    await externalAuth.get('/');
+  } catch {}
+  // Primeiro tenta cache
+  const cached = externalCache.get(String(email).toLowerCase());
+  if (cached) return cached;
+  // Busca completa
+  const res = await externalAuth.get('/users');
+  const users = Array.isArray(res.data) ? res.data : [];
+  users.forEach(u => {
+    externalCache.set(String(u.email).toLowerCase(), {
+      name: u.name,
+      email: u.email,
+      passwordHash: u.password || u.passwordHash
+    });
+  });
+  return externalCache.get(String(email).toLowerCase());
+}
 
 // Validações para registro
 const registerValidation = [
@@ -52,14 +78,10 @@ router.post('/register', registerValidation, async (req, res) => {
 
     const { name, email, password, userType, age, preferredGenres, dailyReadingGoal } = req.body;
 
-    // Verificar se usuário já existe
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(409).json({
-        message: 'Usuário já existe com este email',
-        error: 'USER_EXISTS'
-      });
-    }
+    // Integração somente com banco externo: não validar duplicidade local
+
+    // Evitar chamada lenta de listagem externa para checar duplicidade.
+    // Confiaremos no banco local para deduplicar e tentaremos criar o usuário externo em background.
 
     // Criar novo usuário
     const userData = {
@@ -78,36 +100,24 @@ router.post('/register', registerValidation, async (req, res) => {
       };
     }
 
-    const user = new User(userData);
-    await user.save();
-
-    // Gerar token
-    const token = generateToken(user._id, user.userType);
-
-    // Remover senha da resposta
-    const userResponse = user.toObject();
-    delete userResponse.password;
-
-    res.status(201).json({
-      message: 'Usuário criado com sucesso',
-      user: userResponse,
-      token
-    });
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+    // Criar usuário diretamente no Prisma
+    try { await externalAuth.get('/'); } catch {}
+    let externalCreated;
+    try {
+      externalCreated = await externalAuth.post('/users', { name, email, password: passwordHash });
+    } catch (e) {
+      return res.status(503).json({ message: 'Serviço externo indisponível, tente novamente', error: 'EXTERNAL_UNAVAILABLE' });
+    }
+    // Atualiza cache
+    externalCache.set(String(email).toLowerCase(), { name, email, passwordHash });
+    const token = generateToken({ userId: email, email, name, userType: userType || 'user', isActive: true });
+    const externalUser = externalCreated?.data || { name, email };
+    res.status(201).json({ message: 'Usuário criado com sucesso', user: externalUser, token });
 
   } catch (error) {
-    console.error('Erro no registro:', error);
-    
-    if (error.code === 11000) {
-      return res.status(409).json({
-        message: 'Email já está em uso',
-        error: 'DUPLICATE_EMAIL'
-      });
-    }
-
-    res.status(500).json({
-      message: 'Erro interno do servidor',
-      error: 'INTERNAL_ERROR'
-    });
+    res.status(500).json({ message: 'Erro interno do servidor', error: 'INTERNAL_ERROR' });
   }
 });
 
@@ -124,56 +134,19 @@ router.post('/login', loginValidation, async (req, res) => {
     }
 
     const { email, password } = req.body;
-
-    // Buscar usuário
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({
-        message: 'Credenciais inválidas',
-        error: 'INVALID_CREDENTIALS'
-      });
+    const externalUser = await findExternalUserByEmail(email);
+    if (!externalUser) {
+      return res.status(401).json({ message: 'Credenciais inválidas', error: 'INVALID_CREDENTIALS' });
     }
-
-    // Verificar se conta está ativa
-    if (!user.isActive) {
-      return res.status(401).json({
-        message: 'Conta desativada',
-        error: 'ACCOUNT_DISABLED'
-      });
+    const hash = externalUser.passwordHash || externalUser.password;
+    const valid = hash ? await bcrypt.compare(password, hash) : false;
+    if (!valid) {
+      return res.status(401).json({ message: 'Credenciais inválidas', error: 'INVALID_CREDENTIALS' });
     }
-
-    // Verificar senha
-    const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        message: 'Credenciais inválidas',
-        error: 'INVALID_CREDENTIALS'
-      });
-    }
-
-    // Atualizar último login
-    user.lastLogin = new Date();
-    await user.save();
-
-    // Gerar token
-    const token = generateToken(user._id, user.userType);
-
-    // Remover senha da resposta
-    const userResponse = user.toObject();
-    delete userResponse.password;
-
-    res.json({
-      message: 'Login realizado com sucesso',
-      user: userResponse,
-      token
-    });
-
+    const token = generateToken({ userId: email, email, name: externalUser.name || '', userType: 'user', isActive: true });
+    res.json({ message: 'Login realizado com sucesso', user: { name: externalUser.name || '', email }, token });
   } catch (error) {
-    console.error('Erro no login:', error);
-    res.status(500).json({
-      message: 'Erro interno do servidor',
-      error: 'INTERNAL_ERROR'
-    });
+    res.status(500).json({ message: 'Erro interno do servidor', error: 'INTERNAL_ERROR' });
   }
 });
 

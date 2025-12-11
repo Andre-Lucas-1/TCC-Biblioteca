@@ -8,6 +8,8 @@ require('dotenv').config();
 const app = express();
 
 // Middlewares de segurança
+// Necessário para ambientes com proxies (ngrok, render) e rate-limit correto
+app.set('trust proxy', 1);
 app.use(helmet());
 
 // Rate limiting
@@ -15,6 +17,7 @@ const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutos
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limite de 100 requests por windowMs
   message: 'Muitas tentativas, tente novamente mais tarde.'
+  , keyGenerator: (req) => req.ip
 });
 app.use(limiter);
 

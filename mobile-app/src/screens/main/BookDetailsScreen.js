@@ -15,6 +15,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import externalBooksAPI from '../../services/externalBooksAPI';
 const { gutendexAPI, bookUtils } = externalBooksAPI;
+import { apiUtils } from '../../services/api';
 import { addBookToLibrary } from '../../store/slices/booksSlice';
 import { startReading } from '../../store/slices/readingSlice';
 import { chaptersAPI } from '../../services/api';
@@ -80,6 +81,11 @@ const BookDetailsScreen = ({ navigation, route }) => {
     } catch (error) {
       const status = error?.response?.status;
       const msg = error?.response?.data?.message;
+      if (status === 401) {
+        try { await apiUtils.logout(); } catch {}
+        Alert.alert('Sessão expirada', 'Faça login para adicionar livros à sua biblioteca.');
+        return;
+      }
       if (status === 404) {
         Alert.alert('Livro não encontrado', msg || 'ID inválido na Gutendex');
       } else if (status === 422) {
@@ -121,6 +127,11 @@ const BookDetailsScreen = ({ navigation, route }) => {
     } catch (error) {
       const status = error?.response?.status;
       const msg = error?.response?.data?.message;
+      if (status === 401) {
+        try { await apiUtils.logout(); } catch {}
+        Alert.alert('Sessão expirada', 'Faça login para iniciar a leitura e salvar progresso.');
+        return;
+      }
       if (status === 404) {
         Alert.alert('Livro não encontrado', msg || 'ID inválido na Gutendex');
       } else if (status === 422) {

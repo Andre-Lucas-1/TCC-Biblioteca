@@ -15,6 +15,7 @@ import {
 import { useDispatch, useSelector } from 'react-redux';
 import { COLORS, SIZES, FONTS, SHADOWS, BOOK_GENRES } from '../../constants';
 import { fetchBooks, clearFilters } from '../../store/slices/booksSlice';
+import { apiUtils } from '../../services/api';
 import { Logo } from '../../components';
 import externalBooksAPI from '../../services/externalBooksAPI';
 const { gutendexAPI, bookUtils } = externalBooksAPI;
@@ -28,15 +29,22 @@ const LibraryScreen = ({ navigation }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [searchTimeout, setSearchTimeout] = useState(null);
-  const [viewMode, setViewMode] = useState('library');
+  const [viewMode, setViewMode] = useState('explore');
   const [filteredLibrary, setFilteredLibrary] = useState([]);
   const [explorePage, setExplorePage] = useState(1);
   const [exploreHasNext, setExploreHasNext] = useState(true);
 
   useEffect(() => {
     // Carregar livros iniciais
-    dispatch(fetchBooks({ limit: 20 }));
-    loadInitialBooks();
+    const init = async () => {
+      const authed = await apiUtils.isAuthenticated();
+      if (authed) {
+        dispatch(fetchBooks({ limit: 20 }));
+        setViewMode('library');
+      }
+      await loadInitialBooks();
+    };
+    init();
   }, [dispatch]);
 
   useEffect(() => {
