@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { userAPI } from '../../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Async thunks
 export const fetchUserProfile = createAsyncThunk(
@@ -54,6 +55,82 @@ export const fetchUserStats = createAsyncThunk(
       return rejectWithValue(
         error.response?.data?.message || 'Erro ao carregar estatísticas'
       );
+    }
+  }
+);
+
+export const fetchGoalsProgress = createAsyncThunk(
+  'user/fetchGoalsProgress',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await userAPI.getGoalsProgress();
+      try { await AsyncStorage.setItem('cache:/users/goals-progress', JSON.stringify(response.data)); } catch {}
+      return response.data;
+    } catch (error) {
+      try {
+        const raw = await AsyncStorage.getItem('cache:/users/goals-progress');
+        if (raw) {
+          const cached = JSON.parse(raw);
+          return cached;
+        }
+      } catch {}
+      return rejectWithValue(error.response?.data?.message || 'Erro ao carregar progresso de metas');
+    }
+  }
+);
+
+export const fetchUserGoals = createAsyncThunk(
+  'user/fetchUserGoals',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await userAPI.getGoals();
+      try { await AsyncStorage.setItem('cache:/users/goals', JSON.stringify(response.data)); } catch {}
+      return response.data;
+    } catch (error) {
+      try {
+        const raw = await AsyncStorage.getItem('cache:/users/goals');
+        if (raw) {
+          const cached = JSON.parse(raw);
+          return cached;
+        }
+      } catch {}
+      return rejectWithValue(error.response?.data?.message || 'Erro ao carregar metas');
+    }
+  }
+);
+
+export const createUserGoal = createAsyncThunk(
+  'user/createUserGoal',
+  async (goal, { rejectWithValue }) => {
+    try {
+      const response = await userAPI.createGoal(goal);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.message || 'Erro ao criar meta');
+    }
+  }
+);
+
+export const updateUserGoal = createAsyncThunk(
+  'user/updateUserGoal',
+  async ({ id, updates }, { rejectWithValue }) => {
+    try {
+      const response = await userAPI.updateGoal(id, updates);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.message || 'Erro ao atualizar meta');
+    }
+  }
+);
+
+export const deleteUserGoal = createAsyncThunk(
+  'user/deleteUserGoal',
+  async (id, { rejectWithValue }) => {
+    try {
+      const response = await userAPI.deleteGoal(id);
+      return { id, ...response.data };
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.message || 'Erro ao excluir meta');
     }
   }
 );
@@ -128,7 +205,15 @@ const initialState = {
       weekly: 3, // livros
       monthly: 12, // livros
     },
+    goalsProgress: {
+      dailyMinutes: 0,
+      weeklyBooks: 0,
+      monthlyBooks: 0,
+    },
   },
+  goals: [],
+  isLoadingGoals: false,
+  goalsError: null,
   
   // Conquistas
   achievements: [],
@@ -202,6 +287,36 @@ const userSlice = createSlice({
       state.stats.booksRead = (state.stats.booksRead || 0) + 1;
       state.stats.totalBooksRead = (state.stats.totalBooksRead || 0) + 1;
     },
+    addGoalLocal: (state, action) => {
+      const g = action.payload.goal || action.payload;
+      if (!g || !g._id) return;
+      const exists = state.goals.some(x => x._id === g._id);
+      if (!exists) {
+        state.goals.unshift({ ...g, current: g.current || 0, percentage: g.percentage || 0 });
+      }
+    },
+    removeGoalLocal: (state, action) => {
+      const id = action.payload;
+      state.goals = state.goals.filter(g => g._id !== id);
+    },
+    updateGoalsProgressLocal: (state, action) => {
+      const { deltaDailyMinutes = 0, deltaWeeklyBooks = 0, deltaMonthlyBooks = 0 } = action.payload || {};
+      state.stats.goalsProgress.dailyMinutes = (state.stats.goalsProgress.dailyMinutes || 0) + deltaDailyMinutes;
+      state.stats.goalsProgress.weeklyBooks = (state.stats.goalsProgress.weeklyBooks || 0) + deltaWeeklyBooks;
+      state.stats.goalsProgress.monthlyBooks = (state.stats.goalsProgress.monthlyBooks || 0) + deltaMonthlyBooks;
+    },
+    updateCustomGoalsProgressLocal: (state, action) => {
+      const { dailyMinutes, weeklyBooks, monthlyBooks } = action.payload || {};
+      state.goals = (state.goals || []).map(g => {
+        let current = g.current || 0;
+        if (g.type === 'minutes' && g.period === 'day' && typeof dailyMinutes === 'number') current = dailyMinutes;
+        if (g.type === 'books' && g.period === 'week' && typeof weeklyBooks === 'number') current = weeklyBooks;
+        if (g.type === 'books' && g.period === 'month' && typeof monthlyBooks === 'number') current = monthlyBooks;
+        const target = g.target || 0;
+        const percentage = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+        return { ...g, current, percentage };
+      });
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -269,6 +384,47 @@ const userSlice = createSlice({
         state.isLoadingStats = false;
         state.statsError = action.payload;
       })
+      // Fetch goals progress
+      .addCase(fetchGoalsProgress.pending, (state) => {
+        state.isLoadingStats = true;
+      })
+      .addCase(fetchGoalsProgress.fulfilled, (state, action) => {
+        state.isLoadingStats = false;
+        state.stats.goalsProgress = action.payload.progress || state.stats.goalsProgress;
+      })
+      .addCase(fetchGoalsProgress.rejected, (state) => {
+        state.isLoadingStats = false;
+      })
+      .addCase(fetchUserGoals.pending, (state) => {
+        state.isLoadingGoals = true;
+        state.goalsError = null;
+      })
+      .addCase(fetchUserGoals.fulfilled, (state, action) => {
+        state.isLoadingGoals = false;
+        const remote = action.payload.goals || [];
+        const byId = new Map(remote.map(g => [g._id, g]));
+        state.goals.forEach(g => { if (!byId.has(g._id)) byId.set(g._id, g); });
+        state.goals = Array.from(byId.values());
+      })
+      .addCase(fetchUserGoals.rejected, (state, action) => {
+        state.isLoadingGoals = false;
+        state.goalsError = action.payload;
+      })
+      .addCase(createUserGoal.fulfilled, (state, action) => {
+        if (action.payload.goal) {
+          const g = action.payload.goal;
+          state.goals.unshift({ ...g, current: 0, percentage: 0 });
+        }
+      })
+      .addCase(updateUserGoal.fulfilled, (state, action) => {
+        const updated = action.payload.goal;
+        if (!updated) return;
+        const idx = state.goals.findIndex(g => g._id === updated._id);
+        if (idx !== -1) state.goals[idx] = updated;
+      })
+      .addCase(deleteUserGoal.fulfilled, (state, action) => {
+        state.goals = state.goals.filter(g => g._id !== action.payload.id);
+      })
       
       // Fetch user achievements
       .addCase(fetchUserAchievements.pending, (state) => {
@@ -313,6 +469,10 @@ export const {
   addAchievement,
   addBadge,
   incrementBooksRead,
+  addGoalLocal,
+  removeGoalLocal,
+  updateGoalsProgressLocal,
+  updateCustomGoalsProgressLocal,
 } = userSlice.actions;
 
 // Selectors

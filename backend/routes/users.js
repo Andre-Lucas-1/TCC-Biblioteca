@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const ReadingProgress = require('../models/ReadingProgress');
+const UserGoal = require('../models/UserGoal');
 const { authenticateToken, requireOwnershipOrLibrarian, requireLibrarian } = require('../middleware/auth');
 
 const router = express.Router();
@@ -369,3 +370,127 @@ router.delete('/:id', authenticateToken, requireOwnershipOrLibrarian, async (req
 });
 
 module.exports = router;
+router.get('/goals-progress', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const progresses = await ReadingProgress.find({ user: userId }).lean();
+    let minutesToday = 0;
+    let booksWeek = 0;
+    let booksMonth = 0;
+    for (const p of progresses) {
+      if (Array.isArray(p.readingSessions)) {
+        for (const s of p.readingSessions) {
+          const end = s.endTime || p.lastReadAt || p.completedAt || p.startedAt;
+          if (end && end >= startOfDay) minutesToday += s.duration || 0;
+        }
+      }
+      if (p.status === 'completed' && p.completedAt) {
+        if (p.completedAt >= startOfWeek) booksWeek += 1;
+        if (p.completedAt >= startOfMonth) booksMonth += 1;
+      }
+    }
+    res.json({
+      message: 'Progresso de metas obtido com sucesso',
+      progress: {
+        dailyMinutes: minutesToday,
+        weeklyBooks: booksWeek,
+        monthlyBooks: booksMonth
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
+router.get('/goals', authenticateToken, async (req, res) => {
+  try {
+    const goals = await UserGoal.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+    const progresses = await ReadingProgress.find({ user: req.user._id }).lean();
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    const minutesSince = (since) => {
+      let total = 0;
+      for (const p of progresses) {
+        if (Array.isArray(p.readingSessions)) {
+          for (const s of p.readingSessions) {
+            const end = s.endTime || p.lastReadAt || p.completedAt || p.startedAt;
+            if (end && end >= since) total += s.duration || 0;
+          }
+        }
+      }
+      return total;
+    };
+    const booksSince = (since) => {
+      let total = 0;
+      for (const p of progresses) {
+        if (p.status === 'completed' && p.completedAt && p.completedAt >= since) total += 1;
+      }
+      return total;
+    };
+    const withProgress = goals.map(g => {
+      let current = 0;
+      const periodStart = g.period === 'day' ? startOfDay : g.period === 'week' ? startOfWeek : g.period === 'month' ? startOfMonth : startOfYear;
+      const createdAt = g.createdAt ? new Date(g.createdAt) : startOfDay;
+      const sinceGoal = new Date(Math.max(periodStart.getTime(), createdAt.getTime()));
+      if (g.type === 'minutes') {
+        current = minutesSince(sinceGoal);
+      } else if (g.type === 'books') {
+        current = booksSince(sinceGoal);
+      }
+      const percentage = g.target > 0 ? Math.min(100, Math.round((current / g.target) * 100)) : 0;
+      return { ...g, current, percentage };
+    });
+    res.json({ message: 'Metas obtidas com sucesso', goals: withProgress });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
+router.post('/goals', authenticateToken, async (req, res) => {
+  try {
+    const { title, type, period, target } = req.body;
+    if (!title || !type || !period || !target) return res.status(400).json({ message: 'Dados inválidos' });
+    if (!['minutes', 'books'].includes(type)) return res.status(400).json({ message: 'Tipo inválido' });
+    if (!['day', 'week', 'month', 'year'].includes(period)) return res.status(400).json({ message: 'Período inválido' });
+    const t = parseInt(target);
+    if (!(t > 0)) return res.status(400).json({ message: 'Quantidade inválida' });
+    const goal = await UserGoal.create({ user: req.user._id, title, type, period, target: t });
+    res.status(201).json({ message: 'Meta criada', goal });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
+router.put('/goals/:id', authenticateToken, async (req, res) => {
+  try {
+    const updates = {};
+    ['title','type','period','target','active'].forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
+    if (updates.type && !['minutes', 'books'].includes(updates.type)) return res.status(400).json({ message: 'Tipo inválido' });
+    if (updates.period && !['day', 'week', 'month', 'year'].includes(updates.period)) return res.status(400).json({ message: 'Período inválido' });
+    if (updates.target !== undefined) updates.target = parseInt(updates.target);
+    const goal = await UserGoal.findOneAndUpdate({ _id: req.params.id, user: req.user._id }, updates, { new: true });
+    if (!goal) return res.status(404).json({ message: 'Meta não encontrada' });
+    res.json({ message: 'Meta atualizada', goal });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
+router.delete('/goals/:id', authenticateToken, async (req, res) => {
+  try {
+    const goal = await UserGoal.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+    if (!goal) return res.status(404).json({ message: 'Meta não encontrada' });
+    res.json({ message: 'Meta excluída' });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});

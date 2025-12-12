@@ -16,6 +16,7 @@ import { Logo } from '../../components';
 import { fetchUserProfile, fetchUserStats } from '../../store/slices/userSlice';
 import { fetchAchievements, selectAchievements } from '../../store/slices/gamificationSlice';
 import { useFocusEffect } from '@react-navigation/native';
+import ui from '../../theme/ui';
 
 
 const ProfileScreen = ({ navigation }) => {
@@ -96,7 +97,7 @@ const ProfileScreen = ({ navigation }) => {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={ui.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       
       <ScrollView
@@ -114,7 +115,7 @@ const ProfileScreen = ({ navigation }) => {
         />
 
         {/* Profile Card */}
-        <View style={styles.profileCard}>
+        <View style={[styles.profileCard, ui.card]}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
@@ -143,10 +144,7 @@ const ProfileScreen = ({ navigation }) => {
             <Text style={styles.statLabel}>Livros Lidos</Text>
           </View>
           
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{(stats?.readingTime ?? stats?.totalReadingTime ?? 0)}h</Text>
-            <Text style={styles.statLabel}>Tempo de Leitura</Text>
-          </View>
+          
           
           
         </View>
@@ -154,9 +152,9 @@ const ProfileScreen = ({ navigation }) => {
 
 
         {Array.isArray(achievementsState.unlocked) && achievementsState.unlocked.length > 0 && (
-          <View style={styles.achievementsSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Conquistas Recentes</Text>
+          <View style={ui.section}>
+            <View style={[styles.sectionHeader, ui.screenPadding]}>
+              <Text style={ui.sectionTitle}>Conquistas Recentes</Text>
               <TouchableOpacity onPress={handleAchievements}>
                 <Text style={styles.seeAllText}>Ver todas</Text>
               </TouchableOpacity>
@@ -164,12 +162,12 @@ const ProfileScreen = ({ navigation }) => {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.achievementsScroll}
+              contentContainerStyle={[styles.achievementsScroll, ui.screenPadding]}
             >
               {achievementsState.unlocked.slice(0, 8).map((a) => {
                 const icon = a.icon || (achievementsState.available || []).find(av => av.id === a.id)?.icon || '🏆';
                 return (
-                  <View key={a.id} style={styles.achievementItem}>
+                  <View key={a.id} style={[styles.achievementItem, ui.card]}>
                     <Text style={styles.achievementIcon}>{icon}</Text>
                     <Text style={styles.achievementTitle}>{a.name}</Text>
                   </View>
@@ -180,7 +178,7 @@ const ProfileScreen = ({ navigation }) => {
         )}
 
         {/* Menu Items */}
-        <View style={styles.menuSection}>
+        <View style={[styles.menuSection, ui.screenPadding]}>
           {menuItems.map((item, index) => (
             <TouchableOpacity
               key={index}
@@ -202,7 +200,7 @@ const ProfileScreen = ({ navigation }) => {
 
         {/* Logout Button */}
         <TouchableOpacity
-          style={styles.logoutButton}
+          style={[styles.logoutButton, ui.card]}
           onPress={handleLogout}
           activeOpacity={0.7}
         >

@@ -142,6 +142,11 @@ export const userAPI = {
   getPreferences: () => api.get('/users/preferences'),
   updatePreferences: (preferences) => api.put('/users/preferences', preferences),
   getStats: () => api.get('/users/stats'),
+  getGoalsProgress: () => api.get('/users/goals-progress'),
+  getGoals: () => api.get('/users/goals'),
+  createGoal: (data) => api.post('/users/goals', data),
+  updateGoal: (id, data) => api.put(`/users/goals/${id}`, data),
+  deleteGoal: (id) => api.delete(`/users/goals/${id}`),
   uploadAvatar: (formData) => api.post('/users/avatar', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
@@ -152,7 +157,20 @@ export const userAPI = {
 
 // Serviços de Livros
 export const booksAPI = {
-  getBooks: (params = {}) => api.get('/books', { params }),
+  getBooks: async (params = {}) => {
+    const key = `cache:/books:list:${JSON.stringify(params)}`;
+    try {
+      const res = await api.get('/books', { params });
+      try { await AsyncStorage.setItem(key, JSON.stringify(res.data)); } catch {}
+      return res;
+    } catch (error) {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) return { data: JSON.parse(raw) };
+      } catch {}
+      throw error;
+    }
+  },
   getBook: (id) => api.get(`/books/${id}`),
   addBook: (bookData) => api.post('/books/add-to-library', bookData),
   searchBooks: (query, filters = {}) => api.get('/books/search', {
@@ -180,13 +198,31 @@ export const readingAPI = {
   getReadingProgress: () => api.get('/progress'),
   getBookProgress: (bookId) => api.get(`/progress/book/${bookId}`),
   startReading: (bookId) => api.post('/progress/start', { bookId }),
-  startSession: (bookId, chapterId) => api.post('/reading/session/start', { bookId, chapterId }),
-  endSession: (sessionId, data) => api.post(`/reading/session/${sessionId}/end`, data),
-  markChapterComplete: (bookId, chapterId) => api.post('/reading/chapter/complete', {
-    bookId,
-    chapterId,
-  }),
-  updateReadingStatus: (bookId, status) => api.put(`/reading/status/${bookId}`, { status }),
+  startSession: async (bookId) => {
+    const res = await api.get(`/progress/book/${bookId}`);
+    const id = res.data?.progress?._id || res.data?.progress?.id;
+    return api.put(`/progress/${id}/session/start`);
+  },
+  endSession: async (bookId, data) => {
+    const res = await api.get(`/progress/book/${bookId}`);
+    const id = res.data?.progress?._id || res.data?.progress?.id;
+    return api.put(`/progress/${id}/session/end`, data);
+  },
+  markChapterComplete: async (bookId, chapterId) => {
+    const res = await api.get(`/progress/book/${bookId}`);
+    const id = res.data?.progress?._id || res.data?.progress?.id;
+    return api.put(`/progress/${id}/chapter/${chapterId}/complete`);
+  },
+  updateReadingStatus: async (bookId, status) => {
+    const res = await api.get(`/progress/book/${bookId}`);
+    const id = res.data?.progress?._id || res.data?.progress?.id;
+    return api.put(`/progress/${id}/status`, { status });
+  },
+  updateStatus: async (bookId, status) => {
+    const res = await api.get(`/progress/book/${bookId}`);
+    const id = res.data?.progress?._id || res.data?.progress?.id;
+    return api.put(`/progress/${id}/status`, { status });
+  },
   addToFavorites: (bookId) => api.post('/reading/favorites', { bookId }),
   removeFromFavorites: (bookId) => api.delete(`/reading/favorites/${bookId}`),
   getFavorites: () => api.get('/reading/favorites'),

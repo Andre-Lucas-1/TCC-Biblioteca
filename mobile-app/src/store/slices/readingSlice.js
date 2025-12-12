@@ -96,7 +96,7 @@ export const updateReadingStatus = createAsyncThunk(
   'reading/updateReadingStatus',
   async ({ bookId, status }, { rejectWithValue }) => {
     try {
-      const response = await readingAPI.updateStatus(bookId, status);
+      const response = await readingAPI.updateReadingStatus(bookId, status);
       return { bookId, progress: response.data.progress };
     } catch (error) {
       return rejectWithValue(

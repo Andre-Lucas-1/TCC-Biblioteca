@@ -12,6 +12,7 @@ import {
 import { useDispatch, useSelector } from 'react-redux';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { Logo } from '../../components';
+import ui from '../../theme/ui';
 import { fetchAchievements } from '../../store/slices/gamificationSlice';
 import { selectAchievements } from '../../store/slices/gamificationSlice';
 
@@ -97,7 +98,7 @@ const AchievementsScreen = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={ui.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       
       <ScrollView
@@ -114,7 +115,7 @@ const AchievementsScreen = ({ navigation }) => {
           }
         />
 
-        <Text style={styles.title}>Conquistas</Text>
+        <Text style={[styles.title, ui.screenPadding]}>Conquistas</Text>
 
         {/* Stats Summary */}
         <View style={styles.statsContainer}>
@@ -136,8 +137,8 @@ const AchievementsScreen = ({ navigation }) => {
 
         {/* Unlocked Achievements */}
         {unlockedAchievements.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🏆 Conquistas Desbloqueadas</Text>
+          <View style={ui.section}>
+            <Text style={[styles.sectionTitle, ui.screenPadding]}>🏆 Conquistas Desbloqueadas</Text>
             <FlatList
               data={unlockedAchievements}
               renderItem={renderAchievement}
@@ -149,8 +150,8 @@ const AchievementsScreen = ({ navigation }) => {
 
         {/* Locked Achievements */}
         {lockedAchievements.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🔒 Em Progresso</Text>
+          <View style={ui.section}>
+            <Text style={[styles.sectionTitle, ui.screenPadding]}>🔒 Em Progresso</Text>
             <FlatList
               data={lockedAchievements}
               renderItem={renderAchievement}

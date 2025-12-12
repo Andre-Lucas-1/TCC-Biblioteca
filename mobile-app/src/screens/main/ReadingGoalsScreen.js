@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,74 +9,268 @@ import {
   ScrollView,
   TextInput,
   Alert,
-  Modal,
 } from 'react-native';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { Logo } from '../../components';
+import { useDispatch, useSelector } from 'react-redux';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchGoalsProgress, updateReadingGoals, fetchUserGoals, createUserGoal, updateUserGoal, deleteUserGoal, addGoalLocal, removeGoalLocal } from '../../store/slices/userSlice';
+import { useFocusEffect } from '@react-navigation/native';
+import ui from '../../theme/ui';
 
 const ReadingGoalsScreen = ({ navigation }) => {
-  const [goals, setGoals] = useState([
-    {
-      id: 1,
-      title: 'Livros por Ano',
-      target: 24,
-      current: 8,
-      type: 'books',
-      period: 'year',
-      active: true,
-    },
-    {
-      id: 2,
-      title: 'Minutos por Dia',
-      target: 30,
-      current: 22,
-      type: 'minutes',
-      period: 'day',
-      active: true,
-    },
-    {
-      id: 3,
-      title: 'Páginas por Semana',
-      target: 200,
-      current: 156,
-      type: 'pages',
-      period: 'week',
-      active: false,
-    },
-  ]);
+  const dispatch = useDispatch();
+  const { stats, goals, isLoadingGoals } = useSelector((state) => state.user);
+  const { user } = useSelector((state) => state.auth);
+  const scrollRef = useRef(null);
+  const [localGoals, setLocalGoals] = useState([]);
+  const [pendingGoalId, setPendingGoalId] = useState(null);
+  const userId = user?._id || user?.id || user?.userId || 'anonymous';
+  const cacheKey = `userGoals:${userId}`;
+  const [goalBaselines, setGoalBaselines] = useState({});
+  const [goalLastProgress, setGoalLastProgress] = useState({});
+  const baselineKeyFor = (id) => `goalBaseline:${userId}:${id}`;
+  const lastKeyFor = (id) => `goalLastProgress:${userId}:${id}`;
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newGoal, setNewGoal] = useState({
-    title: '',
-    target: '',
-    type: 'books',
-    period: 'year',
-  });
+  const loadCachedGoals = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(cacheKey);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) setLocalGoals(arr);
+      }
+    } catch (e) {}
+  };
+  const saveCachedGoals = async (arr) => {
+    try {
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(arr));
+    } catch (e) {}
+  };
+  const loadBaselines = async (goalsList) => {
+    try {
+      const entries = Array.isArray(goalsList) ? goalsList : [];
+      const result = {};
+      for (const g of entries) {
+        const id = g._id || g.id; if (!id) continue;
+        const raw = await AsyncStorage.getItem(baselineKeyFor(id));
+        if (raw) { try { result[id] = JSON.parse(raw); } catch {} }
+      }
+      setGoalBaselines(result);
+    } catch {}
+  };
+  const loadLastProgress = async (goalsList) => {
+    try {
+      const entries = Array.isArray(goalsList) ? goalsList : [];
+      const result = {};
+      for (const g of entries) {
+        const id = g._id || g.id; if (!id) continue;
+        const raw = await AsyncStorage.getItem(lastKeyFor(id));
+        if (raw) { try { const num = JSON.parse(raw); if (typeof num === 'number') result[id] = num; } catch {} }
+      }
+      setGoalLastProgress(result);
+    } catch {}
+  };
+  const saveBaselineFor = async (id) => {
+    try {
+      const obj = {
+        createdAt: Date.now(),
+        dailyMinutes: stats?.goalsProgress?.dailyMinutes || 0,
+        weeklyBooks: stats?.goalsProgress?.weeklyBooks || 0,
+        monthlyBooks: stats?.goalsProgress?.monthlyBooks || 0,
+      };
+      await AsyncStorage.setItem(baselineKeyFor(id), JSON.stringify(obj));
+      setGoalBaselines((prev) => ({ ...prev, [id]: obj }));
+    } catch {}
+  };
+
+  const displayGoals = useMemo(() => {
+    const baseGoals = Array.isArray(goals) ? goals : [];
+    return [...localGoals.filter(lg => !baseGoals.some(bg => bg._id === lg._id)), ...baseGoals];
+  }, [localGoals, goals]);
+  useEffect(() => {
+    const run = async () => {
+      const key = `alertedGoals:${userId}`;
+      let alerted = [];
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) alerted = arr;
+        }
+      } catch {}
+      const next = [...alerted];
+      displayGoals.forEach(g => {
+        const id = g._id || g.id;
+        const base = id ? goalBaselines[id] : undefined;
+        let currentVal = g.current || 0;
+        if (base) {
+          if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
+          if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
+          if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
+        }
+        const last = id ? goalLastProgress[id] : undefined;
+        const target = g.target || 0;
+        const justCompleted = typeof last === 'number' && last < target && currentVal >= target && currentVal > last && g.active !== false;
+        if (justCompleted && id && !next.includes(id)) {
+          Alert.alert('Meta concluída', g.title || 'Meta');
+          next.push(id);
+        }
+      });
+      try { await AsyncStorage.setItem(key, JSON.stringify(next)); } catch {}
+    };
+    run();
+  }, [displayGoals, stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks]);
+
+  useEffect(() => {
+    const run = async () => {
+      const key = `alertedBuiltins:${userId}`;
+      let alerted = {};
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          if (obj && typeof obj === 'object') alerted = obj;
+        }
+      } catch {}
+      const dailyPct2 = Math.min(100, Math.round(((stats?.goalsProgress?.dailyMinutes || 0) / (stats?.readingGoals?.daily || 1)) * 100));
+      const weeklyPct2 = Math.min(100, Math.round(((stats?.goalsProgress?.weeklyBooks || 0) / (stats?.readingGoals?.weekly || 1)) * 100));
+      const monthlyPct2 = Math.min(100, Math.round(((stats?.goalsProgress?.monthlyBooks || 0) / (stats?.readingGoals?.monthly || 1)) * 100));
+      let changed = false;
+      if (dailyPct2 >= 100 && !alerted.daily) { Alert.alert('Meta diária concluída', 'Parabéns!'); alerted.daily = true; changed = true; }
+      if (weeklyPct2 >= 100 && !alerted.weekly) { Alert.alert('Meta semanal concluída', 'Parabéns!'); alerted.weekly = true; changed = true; }
+      if (monthlyPct2 >= 100 && !alerted.monthly) { Alert.alert('Meta mensal concluída', 'Parabéns!'); alerted.monthly = true; changed = true; }
+      if (changed) { try { await AsyncStorage.setItem(key, JSON.stringify(alerted)); } catch {} }
+    };
+    run();
+  }, [stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks, stats?.readingGoals?.daily, stats?.readingGoals?.weekly, stats?.readingGoals?.monthly]);
+
+  useEffect(() => {
+    if (Array.isArray(displayGoals) && displayGoals.length > 0) {
+      saveCachedGoals(displayGoals);
+    }
+  }, [goals, localGoals]);
+  useEffect(() => { loadBaselines(displayGoals); loadLastProgress(displayGoals); }, [displayGoals]);
+  const [daily, setDaily] = useState(String(stats?.readingGoals?.daily || 30));
+  const [weekly, setWeekly] = useState(String(stats?.readingGoals?.weekly || 3));
+  const [monthly, setMonthly] = useState(String(stats?.readingGoals?.monthly || 12));
+
+  const lastFetchRef = useRef(0);
+  useEffect(() => {
+    const now = Date.now();
+    if (now - lastFetchRef.current > 15000) {
+      lastFetchRef.current = now;
+      dispatch(fetchGoalsProgress());
+      dispatch(fetchUserGoals());
+      loadCachedGoals();
+    }
+  }, [dispatch]);
+
+  useEffect(() => {
+    loadCachedGoals();
+  }, [userId]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const now = Date.now();
+      if (now - lastFetchRef.current > 15000) {
+        lastFetchRef.current = now;
+        dispatch(fetchUserGoals());
+        dispatch(fetchGoalsProgress());
+        loadCachedGoals();
+      }
+    }, [dispatch])
+  );
 
   const handleBack = () => {
     navigation.goBack();
   };
 
-  const handleAddGoal = () => {
-    if (!newGoal.title || !newGoal.target) {
-      Alert.alert('Erro', 'Preencha todos os campos');
+  const handleSave = () => {
+    const d = Math.max(0, parseInt(daily || '0'));
+    const w = Math.max(0, parseInt(weekly || '0'));
+    const m = Math.max(0, parseInt(monthly || '0'));
+    dispatch(updateReadingGoals({ daily: d, weekly: w, monthly: m }));
+    navigation.goBack();
+  };
+
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newGoal, setNewGoal] = useState({ title: '', target: '', type: 'minutes', period: 'week' });
+  const [creatingGoal, setCreatingGoal] = useState(false);
+  const handleCreateGoal = async () => {
+    const title = (newGoal.title || '').trim();
+    const target = parseInt(newGoal.target || '0');
+    if (!title) {
+      Alert.alert('Campos obrigatórios', 'Informe o título da meta');
       return;
     }
-
-    const goal = {
-      id: Date.now(),
-      title: newGoal.title,
-      target: parseInt(newGoal.target),
-      current: 0,
-      type: newGoal.type,
-      period: newGoal.period,
-      active: true,
-    };
-
-    setGoals([...goals, goal]);
-    setNewGoal({ title: '', target: '', type: 'books', period: 'year' });
-    setModalVisible(false);
+    if (!(target > 0)) {
+      Alert.alert('Campos obrigatórios', 'Informe uma quantidade válida (> 0)');
+      return;
+    }
+    try {
+      setCreatingGoal(true);
+      setModalVisible(false);
+      const optimisticId = `tmp-${Date.now()}`;
+      const optimistic = { _id: optimisticId, title, target, type: newGoal.type, period: newGoal.period, active: true, current: 0, percentage: 0 };
+      setPendingGoalId(optimisticId);
+      setLocalGoals((prev) => [optimistic, ...prev]);
+      const action = await dispatch(createUserGoal({
+        title,
+        target,
+        type: newGoal.type,
+        period: newGoal.period,
+      }));
+      if (action.meta.requestStatus === 'fulfilled') {
+        const created = action.payload?.goal;
+        setNewGoal({ title: '', target: '', type: 'minutes', period: 'week' });
+        if (created) {
+          dispatch(addGoalLocal(created));
+          setLocalGoals((prev) => {
+            const replaced = prev.map(g => g._id === optimisticId ? { ...created, current: 0, percentage: 0 } : g);
+            const exists = replaced.some(g => g._id === created._id);
+            const nextList = exists ? replaced : [{ ...created, current: 0, percentage: 0 }, ...replaced];
+            saveCachedGoals(nextList);
+            return nextList;
+          });
+          await saveBaselineFor(created._id || created.id);
+          setPendingGoalId(null);
+        }
+        dispatch(fetchUserGoals());
+        Alert.alert('Meta criada', 'Sua meta foi adicionada com sucesso');
+        setTimeout(() => { scrollRef.current?.scrollToEnd?.({ animated: true }); }, 200);
+      } else {
+        setModalVisible(true);
+        setLocalGoals((prev) => {
+          const nextList = prev.filter(g => g._id !== optimisticId);
+          saveCachedGoals(nextList);
+          return nextList;
+        });
+        setPendingGoalId(null);
+        Alert.alert('Falha ao salvar', typeof action.payload === 'string' ? action.payload : 'Não foi possível criar a meta');
+      }
+    } finally {
+      setCreatingGoal(false);
+    }
   };
+  const toggleActive = async (id, active) => {
+    await dispatch(updateUserGoal({ id, updates: { active: !active } }));
+    dispatch(fetchUserGoals());
+  };
+  const removeGoal = async (id) => {
+    setLocalGoals((prev) => {
+      const nextList = prev.filter(g => g._id !== id);
+      saveCachedGoals(nextList);
+      return nextList;
+    });
+    dispatch(removeGoalLocal(id));
+    try {
+      await dispatch(deleteUserGoal(id)).unwrap();
+    } catch (e) {
+      Alert.alert('Falha ao excluir', 'Não foi possível excluir a meta agora');
+    }
+    dispatch(fetchUserGoals());
+  };
+  const periodPt = (p) => ({ day: 'Dia', week: 'Semana', month: 'Mês', year: 'Ano' }[p] || p);
 
   const toggleGoal = (id) => {
     setGoals(goals.map(goal => 
@@ -122,75 +316,16 @@ const ReadingGoalsScreen = ({ navigation }) => {
     }
   };
 
-  const renderGoal = (goal) => {
-    const progress = getProgressPercentage(goal.current, goal.target);
-    const isCompleted = progress >= 100;
-
-    return (
-      <View key={goal.id} style={[styles.goalCard, !goal.active && styles.inactiveGoal]}>
-        <View style={styles.goalHeader}>
-          <View style={styles.goalInfo}>
-            <Text style={[styles.goalTitle, !goal.active && styles.inactiveText]}>
-              {goal.title}
-            </Text>
-            <Text style={[styles.goalSubtitle, !goal.active && styles.inactiveText]}>
-              {goal.target} {getTypeLabel(goal.type)} {getPeriodLabel(goal.period)}
-            </Text>
-          </View>
-          <View style={styles.goalActions}>
-            <TouchableOpacity
-              onPress={() => toggleGoal(goal.id)}
-              style={styles.actionButton}
-            >
-              <Text style={styles.actionIcon}>
-                {goal.active ? '⏸️' : '▶️'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => deleteGoal(goal.id)}
-              style={styles.actionButton}
-            >
-              <Text style={styles.actionIcon}>🗑️</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.progressSection}>
-          <View style={styles.progressHeader}>
-            <Text style={[styles.progressText, !goal.active && styles.inactiveText]}>
-              {goal.current} / {goal.target}
-            </Text>
-            <Text style={[styles.progressPercentage, !goal.active && styles.inactiveText]}>
-              {Math.round(progress)}%
-            </Text>
-          </View>
-          
-          <View style={styles.progressBar}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { 
-                  width: `${progress}%`,
-                  backgroundColor: isCompleted ? COLORS.success : 
-                                 goal.active ? COLORS.primary : COLORS.gray[300]
-                }
-              ]} 
-            />
-          </View>
-          
-          {isCompleted && (
-            <Text style={styles.completedText}>🎉 Meta concluída!</Text>
-          )}
-        </View>
-      </View>
-    );
-  };
+  const dailyProgressPct = Math.min(100, Math.round(((stats?.goalsProgress?.dailyMinutes || 0) / (parseInt(daily || '1'))) * 100));
+  const weeklyProgressPct = Math.min(100, Math.round(((stats?.goalsProgress?.weeklyBooks || 0) / (parseInt(weekly || '1'))) * 100));
+  const monthlyProgressPct = Math.min(100, Math.round(((stats?.goalsProgress?.monthlyBooks || 0) / (parseInt(monthly || '1'))) * 100));
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={ui.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -209,143 +344,176 @@ const ReadingGoalsScreen = ({ navigation }) => {
           }
         />
 
-        <Text style={styles.title}>Metas de Leitura</Text>
+        <Text style={[styles.title, ui.screenPadding]}>Metas de Leitura</Text>
 
-        {/* Goals Summary */}
-        <View style={styles.summaryCard}>
+        <View style={[styles.summaryCard, ui.card]}> 
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>{goals.filter(g => g.active).length}</Text>
-            <Text style={styles.summaryLabel}>Metas Ativas</Text>
+            <Text style={styles.summaryNumber}>{stats?.goalsProgress?.dailyMinutes || 0} min</Text>
+            <Text style={styles.summaryLabel}>Hoje</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>
-              {goals.filter(g => getProgressPercentage(g.current, g.target) >= 100).length}
-            </Text>
-            <Text style={styles.summaryLabel}>Concluídas</Text>
+            <Text style={styles.summaryNumber}>{stats?.goalsProgress?.weeklyBooks || 0}</Text>
+            <Text style={styles.summaryLabel}>Livros na Semana</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>
-              {Math.round(
-                goals.reduce((acc, goal) => acc + getProgressPercentage(goal.current, goal.target), 0) / goals.length
-              )}%
-            </Text>
-            <Text style={styles.summaryLabel}>Progresso Médio</Text>
+            <Text style={styles.summaryNumber}>{stats?.goalsProgress?.monthlyBooks || 0}</Text>
+            <Text style={styles.summaryLabel}>Livros no Mês</Text>
           </View>
         </View>
 
-        {/* Goals List */}
-        <View style={styles.goalsSection}>
-          {goals.length > 0 ? (
-            goals.map(renderGoal)
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>🎯</Text>
-              <Text style={styles.emptyTitle}>Nenhuma meta definida</Text>
-              <Text style={styles.emptyText}>
-                Crie sua primeira meta de leitura para começar a acompanhar seu progresso!
-              </Text>
+        <View style={[styles.goalsSection, ui.screenPadding]}>
+          <View style={[styles.goalCard, ui.card]}>
+            <Text style={styles.goalTitle}>Meta diária (minutos)</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.inputInline}
+                value={daily}
+                onChangeText={setDaily}
+                keyboardType="numeric"
+                placeholder="Ex: 30"
+                placeholderTextColor={COLORS.textSecondary}
+              />
             </View>
-          )}
+            <View style={styles.progressBar}><View style={[styles.progressFill, { width: `${dailyProgressPct}%`, backgroundColor: COLORS.primary }]} /></View>
+            <Text style={styles.progressSub}>{stats?.goalsProgress?.dailyMinutes || 0} / {parseInt(daily || '0')} min</Text>
+            {dailyProgressPct >= 100 && (
+              <Text style={styles.progressSub}>Concluída</Text>
+            )}
+          </View>
+
+          <View style={[styles.goalCard, ui.card]}>
+            <Text style={styles.goalTitle}>Meta semanal (livros)</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.inputInline}
+                value={weekly}
+                onChangeText={setWeekly}
+                keyboardType="numeric"
+                placeholder="Ex: 3"
+                placeholderTextColor={COLORS.textSecondary}
+              />
+            </View>
+            <View style={styles.progressBar}><View style={[styles.progressFill, { width: `${weeklyProgressPct}%`, backgroundColor: COLORS.primary }]} /></View>
+            <Text style={styles.progressSub}>{stats?.goalsProgress?.weeklyBooks || 0} / {parseInt(weekly || '0')} livros</Text>
+            {weeklyProgressPct >= 100 && (
+              <Text style={styles.progressSub}>Concluída</Text>
+            )}
+          </View>
+
+          <View style={[styles.goalCard, ui.card]}>
+            <Text style={styles.goalTitle}>Meta mensal (livros)</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.inputInline}
+                value={monthly}
+                onChangeText={setMonthly}
+                keyboardType="numeric"
+                placeholder="Ex: 12"
+                placeholderTextColor={COLORS.textSecondary}
+              />
+            </View>
+            <View style={styles.progressBar}><View style={[styles.progressFill, { width: `${monthlyProgressPct}%`, backgroundColor: COLORS.primary }]} /></View>
+            <Text style={styles.progressSub}>{stats?.goalsProgress?.monthlyBooks || 0} / {parseInt(monthly || '0')} livros</Text>
+            {monthlyProgressPct >= 100 && (
+              <Text style={styles.progressSub}>Concluída</Text>
+            )}
+          </View>
+
+          <View style={styles.actionsRow}>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+              <Text style={styles.saveButtonText}>Salvar</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.goalCard, ui.card]}>
+            <Text style={styles.goalTitle}>Minhas metas</Text>
+            {isLoadingGoals && <Text style={styles.progressSub}>Carregando...</Text>}
+            <View>
+              {displayGoals.length === 0 ? (
+                <Text style={styles.progressSub}>Nenhuma meta personalizada</Text>
+              ) : (
+                displayGoals.map(g => {
+                  const id = g._id || g.id;
+                  const base = id ? goalBaselines[id] : undefined;
+                  let currentVal = g.current || 0;
+                  if (base) {
+                    if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
+                    if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
+                    if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
+                  }
+                  const last = id ? goalLastProgress[id] : undefined;
+                  const pct = g.target > 0 ? Math.min(100, Math.round(((currentVal) / g.target) * 100)) : 0;
+                  try { if (id) AsyncStorage.setItem(lastKeyFor(id), JSON.stringify(currentVal)); } catch {}
+                  return (
+                    <View key={g._id} style={{ marginTop: SIZES.sm }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={styles.goalTitle}>{g.title}</Text>
+                        <View style={{ flexDirection: 'row' }}>
+                          <TouchableOpacity onPress={() => toggleActive(g._id, g.active)} style={{ marginRight: SIZES.sm }}>
+                            <Text style={styles.progressSub}>{g.active ? 'Desativar' : 'Ativar'}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => removeGoal(g._id)}>
+                            <Text style={styles.progressSub}>Excluir</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      <Text style={styles.progressSub}>{currentVal} / {g.target} {g.type === 'minutes' ? 'min' : 'livros'} ({periodPt(g.period)})</Text>
+                      <View style={styles.progressBar}><View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: COLORS.primary }]} /></View>
+                      {pct >= 100 && (<Text style={styles.progressSub}>Concluída</Text>)}
+                      {(g.createdAt && (Date.now() - new Date(g.createdAt).getTime()) < 5 * 60 * 1000) && (<Text style={styles.progressSub}>Meta criada</Text>)}
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          </View>
         </View>
       </ScrollView>
 
-      {/* Add Goal Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
+      {modalVisible && (
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Nova Meta</Text>
-            
+          <View style={[styles.modalCard, ui.card]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.modalTitle}>Nova meta</Text>
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Título da Meta</Text>
-              <TextInput
-                style={styles.input}
-                value={newGoal.title}
-                onChangeText={(text) => setNewGoal({...newGoal, title: text})}
-                placeholder="Ex: Livros por ano"
-                placeholderTextColor={COLORS.textSecondary}
-              />
+              <Text style={styles.inputLabel}>Título</Text>
+              <TextInput style={styles.input} value={newGoal.title} onChangeText={(t) => setNewGoal({ ...newGoal, title: t })} placeholder="Ex: Ler 2 livros" placeholderTextColor={COLORS.textSecondary} />
             </View>
-
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Quantidade</Text>
-              <TextInput
-                style={styles.input}
-                value={newGoal.target}
-                onChangeText={(text) => setNewGoal({...newGoal, target: text})}
-                placeholder="Ex: 24"
-                placeholderTextColor={COLORS.textSecondary}
-                keyboardType="numeric"
-              />
+              <TextInput style={styles.input} value={newGoal.target} onChangeText={(t) => setNewGoal({ ...newGoal, target: t })} keyboardType="numeric" placeholder="Ex: 2" placeholderTextColor={COLORS.textSecondary} />
             </View>
-
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Tipo</Text>
+              <Text style={styles.inputLabel}>Tipo da meta</Text>
               <View style={styles.optionsRow}>
-                {['books', 'minutes', 'pages'].map((type) => (
-                  <TouchableOpacity
-                    key={type}
-                    style={[
-                      styles.optionButton,
-                      newGoal.type === type && styles.selectedOption
-                    ]}
-                    onPress={() => setNewGoal({...newGoal, type})}
-                  >
-                    <Text style={[
-                      styles.optionText,
-                      newGoal.type === type && styles.selectedOptionText
-                    ]}>
-                      {getTypeLabel(type)}
-                    </Text>
+                {['minutes','books'].map(type => (
+                  <TouchableOpacity key={type} style={[styles.optionButton, newGoal.type === type && styles.selectedOption]} onPress={() => setNewGoal({ ...newGoal, type })}>
+                    <Text style={[styles.optionText, newGoal.type === type && styles.selectedOptionText]}>{type === 'minutes' ? 'Minutos' : 'Livros'}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
-
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Período</Text>
               <View style={styles.optionsRow}>
-                {['day', 'week', 'month', 'year'].map((period) => (
-                  <TouchableOpacity
-                    key={period}
-                    style={[
-                      styles.optionButton,
-                      newGoal.period === period && styles.selectedOption
-                    ]}
-                    onPress={() => setNewGoal({...newGoal, period})}
-                  >
-                    <Text style={[
-                      styles.optionText,
-                      newGoal.period === period && styles.selectedOptionText
-                    ]}>
-                      {getPeriodLabel(period).replace('por ', '')}
-                    </Text>
+                {['day','week','month','year'].map(period => (
+                  <TouchableOpacity key={period} style={[styles.optionButton, newGoal.period === period && styles.selectedOption]} onPress={() => setNewGoal({ ...newGoal, period })}>
+                    <Text style={[styles.optionText, newGoal.period === period && styles.selectedOptionText]}>{periodPt(period)}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
-
             <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>✖️ Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleAddGoal}
-              >
-                <Text style={styles.saveButtonText}>Salvar</Text>
+              <TouchableOpacity style={[styles.saveButton, creatingGoal && { opacity: 0.6 }]} onPress={creatingGoal ? undefined : handleCreateGoal} disabled={creatingGoal}>
+                <Text style={styles.saveButtonText}>{creatingGoal ? 'Salvando...' : '✅ Salvar'}</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
-      </Modal>
+      )}
     </SafeAreaView>
   );
 };
@@ -381,9 +549,6 @@ const styles = StyleSheet.create({
   summaryCard: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    backgroundColor: COLORS.white,
-    marginHorizontal: SIZES.lg,
-    borderRadius: SIZES.radius.lg,
     padding: SIZES.lg,
     marginBottom: SIZES.xl,
     ...SHADOWS.medium,
@@ -402,9 +567,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
   },
-  goalsSection: {
-    paddingHorizontal: SIZES.lg,
-  },
+  goalsSection: {},
   goalCard: {
     backgroundColor: COLORS.white,
     borderRadius: SIZES.radius.md,
@@ -437,14 +600,19 @@ const styles = StyleSheet.create({
   inactiveText: {
     color: COLORS.gray[400],
   },
-  goalActions: {
+  inputRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SIZES.sm,
   },
-  actionButton: {
-    marginLeft: SIZES.sm,
-  },
-  actionIcon: {
-    fontSize: 20,
+  inputInline: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.gray[300],
+    borderRadius: SIZES.radius.md,
+    padding: SIZES.sm,
+    fontSize: SIZES.fontSize.md,
+    color: COLORS.text,
   },
   progressSection: {
     marginTop: SIZES.sm,
@@ -475,11 +643,10 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 4,
   },
-  completedText: {
+  progressSub: {
     fontSize: SIZES.fontSize.sm,
-    color: COLORS.success,
-    fontWeight: FONTS.weights.medium,
-    textAlign: 'center',
+    color: COLORS.textSecondary,
+    marginTop: SIZES.xs,
   },
   emptyState: {
     alignItems: 'center',
@@ -501,55 +668,85 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: SIZES.lg,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
+  actionsRow: {
+    marginTop: SIZES.lg,
+  },
+  saveButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: SIZES.radius.md,
+    paddingVertical: SIZES.md,
     alignItems: 'center',
   },
-  modalContent: {
+  saveButtonText: {
+    fontSize: SIZES.fontSize.md,
+    color: COLORS.white,
+    fontWeight: FONTS.weights.semiBold,
+  },
+  modalOverlay: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
+  modalCard: {
+    width: '100%',
     backgroundColor: COLORS.white,
-    borderRadius: SIZES.radius.lg,
-    padding: SIZES.lg,
-    width: '90%',
-    maxWidth: 400,
+    borderTopLeftRadius: SIZES.radius.xl,
+    borderTopRightRadius: SIZES.radius.xl,
+    paddingHorizontal: SIZES.lg,
+    paddingTop: SIZES.md,
+    paddingBottom: SIZES.xl,
   },
   modalTitle: {
     fontSize: SIZES.fontSize.xl,
     fontWeight: FONTS.weights.bold,
     color: COLORS.text,
-    marginBottom: SIZES.lg,
-    textAlign: 'center',
+    marginBottom: SIZES.md,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 48,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: COLORS.gray[300],
+    marginBottom: SIZES.md,
   },
   inputGroup: {
-    marginBottom: SIZES.lg,
+    marginBottom: SIZES.md,
   },
   inputLabel: {
-    fontSize: SIZES.fontSize.md,
-    fontWeight: FONTS.weights.semiBold,
-    color: COLORS.text,
-    marginBottom: SIZES.sm,
+    fontSize: SIZES.fontSize.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SIZES.xs,
   },
   input: {
     borderWidth: 1,
     borderColor: COLORS.gray[300],
-    borderRadius: SIZES.radius.md,
-    padding: SIZES.md,
+    borderRadius: SIZES.radius.lg,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.md,
     fontSize: SIZES.fontSize.md,
     color: COLORS.text,
   },
   optionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: SIZES.sm,
   },
   optionButton: {
     borderWidth: 1,
     borderColor: COLORS.gray[300],
-    borderRadius: SIZES.radius.sm,
+    borderRadius: SIZES.radius.full,
     paddingHorizontal: SIZES.md,
     paddingVertical: SIZES.sm,
-    marginRight: SIZES.sm,
     marginBottom: SIZES.sm,
+    minWidth: '48%',
+    alignItems: 'center',
   },
   selectedOption: {
     backgroundColor: COLORS.primary,
@@ -568,11 +765,11 @@ const styles = StyleSheet.create({
     marginTop: SIZES.lg,
   },
   cancelButton: {
-    flex: 1,
+    flexBasis: '48%',
     borderWidth: 1,
     borderColor: COLORS.gray[300],
     borderRadius: SIZES.radius.md,
-    paddingVertical: SIZES.md,
+    paddingVertical: SIZES.lg,
     marginRight: SIZES.sm,
     alignItems: 'center',
   },
@@ -582,12 +779,11 @@ const styles = StyleSheet.create({
     fontWeight: FONTS.weights.medium,
   },
   saveButton: {
-    flex: 1,
     backgroundColor: COLORS.primary,
     borderRadius: SIZES.radius.md,
-    paddingVertical: SIZES.md,
-    marginLeft: SIZES.sm,
+    paddingVertical: SIZES.lg,
     alignItems: 'center',
+    flexBasis: '48%',
   },
   saveButtonText: {
     fontSize: SIZES.fontSize.md,

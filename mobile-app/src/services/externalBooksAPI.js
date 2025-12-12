@@ -1,9 +1,33 @@
 import api from './api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const lastSearchAt = new Map();
 
 export const gutendexAPI = {
   search: async (query = '', page = 1) => {
-    const response = await api.get('/books/external/search', { params: { query, page } });
-    return response.data;
+    const q = (query || '').trim();
+    const cacheKey = `cache:/books/external/search:${q}:${page}`;
+    const now = Date.now();
+    const last = lastSearchAt.get(cacheKey) || 0;
+    if (now - last < 15000) {
+      try {
+        const raw = await AsyncStorage.getItem(cacheKey);
+        if (raw) return JSON.parse(raw);
+      } catch {}
+    }
+    try {
+      const response = await api.get('/books/external/search', { params: { query: q, page } });
+      const data = response.data;
+      lastSearchAt.set(cacheKey, Date.now());
+      try { await AsyncStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+      return data;
+    } catch (e) {
+      try {
+        const raw = await AsyncStorage.getItem(cacheKey);
+        if (raw) return JSON.parse(raw);
+      } catch {}
+      throw e;
+    }
   },
   details: async (id) => {
     const response = await api.get(`/books/external/${id}`);

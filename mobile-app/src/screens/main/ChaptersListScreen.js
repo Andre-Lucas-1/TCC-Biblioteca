@@ -1,14 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SafeAreaView, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SafeAreaView, FlatList, Alert } from 'react-native';
 import { COLORS, SIZES, FONTS } from '../../constants';
 import api, { chaptersAPI, readingAPI } from '../../services/api';
-import { useDispatch } from 'react-redux';
+import ui from '../../theme/ui';
+import { useDispatch, useSelector } from 'react-redux';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { checkAchievements, fetchAchievements } from '../../store/slices/gamificationSlice';
-import { fetchUserStats, incrementBooksRead } from '../../store/slices/userSlice';
+import { fetchUserStats, incrementBooksRead, fetchGoalsProgress, updateGoalsProgressLocal } from '../../store/slices/userSlice';
 
 const ChaptersListScreen = ({ navigation, route }) => {
   const { bookId, bookTitle } = route.params;
   const dispatch = useDispatch();
+  const { stats, goals } = useSelector((state) => state.user);
+  const { user } = useSelector((state) => state.auth);
   const [chapters, setChapters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -60,7 +64,64 @@ const ChaptersListScreen = ({ navigation, route }) => {
         const newAchievements = Array.isArray(payload.newAchievements) ? payload.newAchievements : [];
         await dispatch(fetchAchievements());
         await dispatch(fetchUserStats());
+        try { 
+          const beforeWeekly = (stats?.goalsProgress?.weeklyBooks || 0);
+          const beforeMonthly = (stats?.goalsProgress?.monthlyBooks || 0);
+          const afterWeekly = beforeWeekly + 1;
+          const afterMonthly = beforeMonthly + 1;
+          dispatch(updateGoalsProgressLocal({ deltaWeeklyBooks: 1, deltaMonthlyBooks: 1 }));
+          dispatch(updateCustomGoalsProgressLocal({ weeklyBooks: afterWeekly, monthlyBooks: afterMonthly }));
+        } catch {}
         alert('Livro finalizado!');
+        try {
+          const beforeWeekly = (stats?.goalsProgress?.weeklyBooks || 0);
+          const beforeMonthly = (stats?.goalsProgress?.monthlyBooks || 0);
+          const afterWeekly = beforeWeekly + 1;
+          const afterMonthly = beforeMonthly + 1;
+          const weeklyTarget = (stats?.readingGoals?.weekly || 0);
+          const monthlyTarget = (stats?.readingGoals?.monthly || 0);
+          if (weeklyTarget > 0 && beforeWeekly < weeklyTarget && afterWeekly >= weeklyTarget) {
+            Alert.alert('Meta semanal concluída', 'Parabéns!');
+          }
+          if (monthlyTarget > 0 && beforeMonthly < monthlyTarget && afterMonthly >= monthlyTarget) {
+            Alert.alert('Meta mensal concluída', 'Parabéns!');
+          }
+          const custom = Array.isArray(goals) ? goals : [];
+          for (const g of custom) {
+            const id = g._id || g.id;
+            if (!id) continue;
+            if (g.type === 'books' && g.period === 'week') {
+              const tgt = g.target || 0;
+              const createdAt = g.createdAt ? new Date(g.createdAt) : new Date();
+              const now = new Date();
+              const startOfWeek = new Date(now);
+              startOfWeek.setDate(now.getDate() - now.getDay());
+              const windowStart = new Date(Math.max(startOfWeek.getTime(), createdAt.getTime()));
+              // Como não temos contagem exata por meta aqui, usamos afterWeekly como aproximação
+              if (tgt > 0 && beforeWeekly < tgt && afterWeekly >= tgt) Alert.alert('Meta concluída', g.title || 'Meta');
+            }
+            if (g.type === 'books' && g.period === 'month') {
+              const tgt = g.target || 0;
+              const createdAt = g.createdAt ? new Date(g.createdAt) : new Date();
+              const now = new Date();
+              const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+              const windowStart = new Date(Math.max(startOfMonth.getTime(), createdAt.getTime()));
+              if (tgt > 0 && beforeMonthly < tgt && afterMonthly >= tgt) Alert.alert('Meta concluída', g.title || 'Meta');
+            }
+          }
+          try { await dispatch(fetchUserGoals()); } catch {}
+          try {
+            const updated = {
+              message: 'Progresso de metas obtido com sucesso',
+              progress: {
+                dailyMinutes: stats?.goalsProgress?.dailyMinutes || 0,
+                weeklyBooks: afterWeekly,
+                monthlyBooks: afterMonthly,
+              }
+            };
+            await AsyncStorage.setItem('cache:/users/goals-progress', JSON.stringify(updated));
+          } catch {}
+        } catch {}
         if (newAchievements.length > 0) {
           const names = newAchievements.map(a => a.name).filter(Boolean).join(', ');
           alert(names ? `Conquista desbloqueada: ${names}` : 'Conquista desbloqueada!');
@@ -98,8 +159,8 @@ const ChaptersListScreen = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={ui.container}>
+      <View style={[styles.header, ui.screenPadding]}>
         <TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.backIcon}>‹</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>{bookTitle || 'Capítulos'}</Text>
         <View style={{ width: 24 }} />
@@ -113,7 +174,7 @@ const ChaptersListScreen = ({ navigation, route }) => {
           data={chapters}
           keyExtractor={(item) => item._id}
           renderItem={renderItem}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, ui.screenPadding]}
         />
       )}
     </SafeAreaView>

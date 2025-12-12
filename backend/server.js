@@ -12,14 +12,20 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
 
-// Rate limiting
+// Rate limiting (aliviado em desenvolvimento)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutos
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limite de 100 requests por windowMs
-  message: 'Muitas tentativas, tente novamente mais tarde.'
-  , keyGenerator: (req) => req.ip
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (process.env.NODE_ENV === 'production' ? 100 : 1000),
+  message: 'Muitas tentativas, tente novamente mais tarde.',
+  keyGenerator: (req) => {
+    const auth = req.headers['authorization'] || '';
+    return auth || req.ip;
+  }
 });
-app.use(limiter);
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV !== 'production') return next();
+  return limiter(req, res, next);
+});
 
 // CORS
 const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000'];

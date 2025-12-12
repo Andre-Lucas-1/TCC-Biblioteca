@@ -18,6 +18,7 @@ import { fetchBooks, clearFilters } from '../../store/slices/booksSlice';
 import api, { apiUtils, readingAPI } from '../../services/api';
 import { Logo } from '../../components';
 import externalBooksAPI from '../../services/externalBooksAPI';
+import ui from '../../theme/ui';
 const { gutendexAPI, bookUtils } = externalBooksAPI;
 
 const LibraryScreen = ({ navigation }) => {
@@ -296,7 +297,7 @@ const LibraryScreen = ({ navigation }) => {
   
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={ui.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       
       {/* Header */}
@@ -309,7 +310,7 @@ const LibraryScreen = ({ navigation }) => {
       />
 
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, ui.screenPadding]}>
         <View style={styles.searchInputContainer}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
@@ -323,7 +324,7 @@ const LibraryScreen = ({ navigation }) => {
       </View>
 
       {/* Status Filter */}
-      <View style={styles.statusFilterContainer}>
+      <View style={[styles.statusFilterContainer, ui.screenPadding]}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -354,7 +355,7 @@ const LibraryScreen = ({ navigation }) => {
       
 
       {/* Switch Library/Explore */}
-      <View style={styles.viewSwitchContainer}>
+      <View style={[styles.viewSwitchContainer, ui.screenPadding]}>
         <View style={styles.viewSwitch}>
           <TouchableOpacity
             style={[styles.viewSwitchBtn, viewMode === 'library' && styles.viewSwitchBtnActive]}
@@ -375,7 +376,7 @@ const LibraryScreen = ({ navigation }) => {
       <View style={styles.booksContainer}>
         {viewMode === 'library' ? (
           <>
-            <View style={styles.booksHeader}>
+            <View style={[styles.booksHeader, ui.screenPadding]}>
               <Text style={styles.booksCount}>{filteredLibrary?.length || books?.length || 0} na biblioteca</Text>
             </View>
             <FlatList
@@ -397,7 +398,7 @@ const LibraryScreen = ({ navigation }) => {
           </>
         ) : (
           <>
-            <View style={styles.booksHeader}>
+            <View style={[styles.booksHeader, ui.screenPadding]}>
               <Text style={styles.booksCount}>{searchResults?.length || 0} livros encontrados</Text>
               <TouchableOpacity style={styles.sortButton}>
                 <Text style={styles.sortIcon}>⚡</Text>
