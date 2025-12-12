@@ -4,7 +4,7 @@
     "slug": "leiaeapp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/Gemini_Generated_Image_3zzytb3zzytb3zzy-removebg-preview.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
   "splash": {
@@ -17,13 +17,13 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/Gemini_Generated_Image_3zzytb3zzytb3zzy-removebg-preview.png",
         "backgroundColor": "#7D4105"
       },
       "edgeToEdgeEnabled": true
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/Gemini_Generated_Image_3zzytb3zzytb3zzy-removebg-preview.png"
     }
   }
 }

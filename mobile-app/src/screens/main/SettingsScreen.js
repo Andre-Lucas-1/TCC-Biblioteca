@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ScrollView,
   Switch,
   Alert,
+  TextInput,
 } from 'react-native';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { Logo } from '../../components';
@@ -20,6 +21,14 @@ const SettingsScreen = ({ navigation }) => {
     autoSync: true,
     readingReminders: true,
   });
+  const [apiUrl, setApiUrl] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      const current = await apiUtils.getApiBaseUrl();
+      setApiUrl(current);
+    })();
+  }, []);
 
   const handleBack = () => {
     navigation.goBack();
@@ -130,6 +139,27 @@ const SettingsScreen = ({ navigation }) => {
         />
 
         <Text style={styles.title}>Configurações</Text>
+
+        {/* API Server URL */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Servidor da API</Text>
+          <View style={styles.settingItem}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingTitle}>Base URL</Text>
+              <TextInput
+                value={apiUrl}
+                onChangeText={setApiUrl}
+                placeholder="http://IP:3000/api"
+                style={styles.input}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            <TouchableOpacity style={styles.saveBtn} onPress={saveApiUrl}>
+              <Text style={styles.saveText}>Salvar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* Settings Section */}
         <View style={styles.section}>
@@ -245,6 +275,26 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontSize.sm,
     color: COLORS.textSecondary,
   },
+  input: {
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.radius.sm,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.sm,
+    borderWidth: 1,
+    borderColor: COLORS.gray[200],
+  },
+  saveBtn: {
+    marginLeft: SIZES.md,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SIZES.md,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.radius.sm,
+    alignSelf: 'center',
+  },
+  saveText: {
+    color: COLORS.white,
+    fontWeight: FONTS.weights.semiBold,
+  },
   actionItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -307,3 +357,12 @@ const styles = StyleSheet.create({
 });
 
 export default SettingsScreen;
+import { apiUtils } from '../../services/api';
+  const saveApiUrl = async () => {
+    try {
+      await apiUtils.setApiBaseUrl(apiUrl);
+      Alert.alert('Configurações', 'URL da API salva com sucesso');
+    } catch (e) {
+      Alert.alert('Erro', 'Não foi possível salvar a URL');
+    }
+  };

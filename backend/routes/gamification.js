@@ -15,7 +15,12 @@ const ACHIEVEMENTS = {
     icon: '📚',
     experience: 50,
     condition: (user, progress) => {
-      return progress.filter(p => p.status === 'completed').length >= 1;
+      const resetAt = user.maintenance?.gamificationResetAt;
+      const after = progress.filter(p => {
+        const d = p.completedAt || p.lastReadAt || p.startedAt;
+        return p.status === 'completed' && (!resetAt || (d && d > resetAt));
+      });
+      return after.length >= 1;
     }
   },
   BOOKWORM: {
@@ -25,7 +30,12 @@ const ACHIEVEMENTS = {
     icon: '🐛',
     experience: 200,
     condition: (user, progress) => {
-      return progress.filter(p => p.status === 'completed').length >= 10;
+      const resetAt = user.maintenance?.gamificationResetAt;
+      const after = progress.filter(p => {
+        const d = p.completedAt || p.lastReadAt || p.startedAt;
+        return p.status === 'completed' && (!resetAt || (d && d > resetAt));
+      });
+      return after.length >= 10;
     }
   },
   SPEED_READER: {
@@ -35,24 +45,16 @@ const ACHIEVEMENTS = {
     icon: '⚡',
     experience: 100,
     condition: (user, progress) => {
+      const resetAt = user.maintenance?.gamificationResetAt;
       return progress.some(p => {
         if (p.status === 'completed' && p.startedAt && p.completedAt) {
+          if (resetAt && !(p.completedAt > resetAt || p.startedAt > resetAt)) return false;
           const timeDiff = p.completedAt - p.startedAt;
           const daysDiff = timeDiff / (1000 * 60 * 60 * 24);
           return daysDiff < 3;
         }
         return false;
       });
-    }
-  },
-  CONSISTENT_READER: {
-    id: 'consistent_reader',
-    name: 'Leitor Consistente',
-    description: 'Mantenha uma sequência de 7 dias lendo',
-    icon: '🔥',
-    experience: 150,
-    condition: (user, progress) => {
-      return user.gamification.streak.current >= 7;
     }
   },
   MARATHON_READER: {
@@ -62,50 +64,14 @@ const ACHIEVEMENTS = {
     icon: '🏃',
     experience: 75,
     condition: (user, progress) => {
+      const resetAt = user.maintenance?.gamificationResetAt;
       return progress.some(p => {
-        return p.readingSessions.some(session => session.duration > 120); // 120 minutos = 2 horas
+        if (!Array.isArray(p.readingSessions)) return false;
+        return p.readingSessions.some(session => {
+          const end = session.endedAt || p.lastReadAt || p.completedAt || p.startedAt;
+          return session.duration > 120 && (!resetAt || (end && end > resetAt));
+        });
       });
-    }
-  },
-  GENRE_EXPLORER: {
-    id: 'genre_explorer',
-    name: 'Explorador de Gêneros',
-    description: 'Complete livros de 5 gêneros diferentes',
-    icon: '🗺️',
-    experience: 125,
-    condition: (user, progress) => {
-      const completedBooks = progress.filter(p => p.status === 'completed');
-      const genres = new Set();
-      completedBooks.forEach(p => {
-        if (p.book && p.book.genre) {
-          genres.add(p.book.genre);
-        }
-      });
-      return genres.size >= 5;
-    }
-  },
-  CHALLENGE_SEEKER: {
-    id: 'challenge_seeker',
-    name: 'Buscador de Desafios',
-    description: 'Complete 3 livros de nível difícil',
-    icon: '💪',
-    experience: 300,
-    condition: (user, progress) => {
-      const hardBooks = progress.filter(p => 
-        p.status === 'completed' && p.book && p.book.difficulty === 'hard'
-      );
-      return hardBooks.length >= 3;
-    }
-  },
-  NOTE_TAKER: {
-    id: 'note_taker',
-    name: 'Anotador',
-    description: 'Faça 50 anotações',
-    icon: '📝',
-    experience: 100,
-    condition: (user, progress) => {
-      const totalNotes = progress.reduce((sum, p) => sum + (p.notes ? p.notes.length : 0), 0);
-      return totalNotes >= 50;
     }
   }
 };
@@ -196,17 +162,23 @@ router.get('/achievements', authenticateToken, async (req, res) => {
       .select('gamification.achievements')
       .lean();
     
-    const userAchievements = user.gamification.achievements.map(a => a.achievementId);
-    
-    const achievements = Object.values(ACHIEVEMENTS).map(achievement => ({
+    const resetAt = user.maintenance?.gamificationResetAt ? new Date(user.maintenance.gamificationResetAt) : null;
+    const userUnlocked = (user.gamification.achievements || []).filter(a => {
+      if ((a.id || a.achievementId) === 'consistent_reader') return false;
+      if (!resetAt) return true;
+      const unlocked = a.unlockedAt ? new Date(a.unlockedAt) : null;
+      return unlocked && unlocked > resetAt;
+    });
+    const userAchievementIds = userUnlocked.map(a => a.id || a.achievementId);
+    const available = Object.values(ACHIEVEMENTS).map(achievement => ({
       ...achievement,
-      unlocked: userAchievements.includes(achievement.id),
-      unlockedAt: user.gamification.achievements.find(a => a.achievementId === achievement.id)?.unlockedAt || null
+      unlocked: userAchievementIds.includes(achievement.id),
+      unlockedAt: userUnlocked.find(a => (a.id || a.achievementId) === achievement.id)?.unlockedAt || null
     }));
-    
     res.json({
       message: 'Conquistas listadas com sucesso',
-      achievements
+      available,
+      unlocked: userUnlocked
     });
   } catch (error) {
     console.error('Erro ao listar conquistas:', error);
@@ -221,17 +193,22 @@ router.get('/badges', authenticateToken, async (req, res) => {
       .select('gamification.badges')
       .lean();
     
-    const userBadges = user.gamification.badges.map(b => b.badgeId);
-    
-    const badges = Object.values(BADGES).map(badge => ({
+    const resetAtB = user.maintenance?.gamificationResetAt ? new Date(user.maintenance.gamificationResetAt) : null;
+    const userUnlocked = (user.gamification.badges || []).filter(b => {
+      if (!resetAtB) return true;
+      const earned = b.earnedAt ? new Date(b.earnedAt) : null;
+      return earned && earned > resetAtB;
+    });
+    const userBadgeIds = userUnlocked.map(b => b.id || b.badgeId);
+    const available = Object.values(BADGES).map(badge => ({
       ...badge,
-      unlocked: userBadges.includes(badge.id),
-      unlockedAt: user.gamification.badges.find(b => b.badgeId === badge.id)?.unlockedAt || null
+      unlocked: userBadgeIds.includes(badge.id),
+      unlockedAt: userUnlocked.find(b => (b.id || b.badgeId) === badge.id)?.earnedAt || null
     }));
-    
     res.json({
       message: 'Badges listadas com sucesso',
-      badges
+      available,
+      unlocked: userUnlocked
     });
   } catch (error) {
     console.error('Erro ao listar badges:', error);
@@ -257,11 +234,13 @@ router.post('/check-achievements', authenticateToken, async (req, res) => {
     
     // Verificar conquistas
     for (const achievement of Object.values(ACHIEVEMENTS)) {
-      const alreadyUnlocked = user.gamification.achievements.some(a => a.achievementId === achievement.id);
+      const alreadyUnlocked = user.gamification.achievements.some(a => (a.id || a.achievementId) === achievement.id);
       
       if (!alreadyUnlocked && achievement.condition(user, progress)) {
         user.gamification.achievements.push({
-          achievementId: achievement.id,
+          id: achievement.id,
+          name: achievement.name,
+          description: achievement.description,
           unlockedAt: new Date()
         });
         
@@ -277,12 +256,14 @@ router.post('/check-achievements', authenticateToken, async (req, res) => {
     
     // Verificar badges
     for (const badge of Object.values(BADGES)) {
-      const alreadyUnlocked = user.gamification.badges.some(b => b.badgeId === badge.id);
+      const alreadyUnlocked = user.gamification.badges.some(b => (b.id || b.badgeId) === badge.id);
       
       if (!alreadyUnlocked && badge.condition(user, progress)) {
         user.gamification.badges.push({
-          badgeId: badge.id,
-          unlockedAt: new Date()
+          id: badge.id,
+          name: badge.name,
+          icon: badge.icon,
+          earnedAt: new Date()
         });
         
         unlockedBadges.push(badge);
@@ -293,12 +274,51 @@ router.post('/check-achievements', authenticateToken, async (req, res) => {
     
     res.json({
       message: 'Verificação de conquistas concluída',
-      unlockedAchievements,
-      unlockedBadges,
-      totalExperienceGained: unlockedAchievements.reduce((sum, a) => sum + a.experienceGained, 0)
+      newAchievements: unlockedAchievements,
+      newBadges: unlockedBadges,
+      experience: unlockedAchievements.reduce((sum, a) => sum + a.experienceGained, 0)
     });
   } catch (error) {
     console.error('Erro ao verificar conquistas:', error);
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
+router.post('/reset', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'Usuário não encontrado' });
+    }
+    user.gamification.experience = 0;
+    user.gamification.level = 1;
+    user.gamification.achievements = [];
+    user.gamification.badges = [];
+    user.gamification.streak.current = 0;
+    user.gamification.streak.longest = 0;
+    user.gamification.streak.lastReadDate = null;
+    await user.save();
+    res.json({ message: 'Gamificação resetada', profile: user.gamification });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
+router.post('/reset-all', authenticateToken, requireLibrarian, async (req, res) => {
+  try {
+    const users = await User.find({});
+    for (const user of users) {
+      user.gamification.experience = 0;
+      user.gamification.level = 1;
+      user.gamification.achievements = [];
+      user.gamification.badges = [];
+      user.gamification.streak.current = 0;
+      user.gamification.streak.longest = 0;
+      user.gamification.streak.lastReadDate = null;
+      await user.save();
+    }
+    res.json({ message: 'Gamificação resetada para todos os usuários', total: users.length });
+  } catch (error) {
     res.status(500).json({ message: 'Erro interno do servidor' });
   }
 });
@@ -315,9 +335,6 @@ router.get('/leaderboard', authenticateToken, async (req, res) => {
         break;
       case 'level':
         sortField = { 'gamification.level': -1, 'gamification.experience': -1 };
-        break;
-      case 'streak':
-        sortField = { 'gamification.streak.current': -1 };
         break;
       case 'books':
         // Para livros completados, precisamos fazer uma agregação

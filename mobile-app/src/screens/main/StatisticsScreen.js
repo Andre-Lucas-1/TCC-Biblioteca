@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -9,95 +9,54 @@ import {
   ScrollView,
   Dimensions,
 } from 'react-native';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { Logo } from '../../components';
 
 const { width } = Dimensions.get('window');
 
 const StatisticsScreen = ({ navigation }) => {
-  const dispatch = useDispatch();
   const { stats } = useSelector((state) => state.user);
-  const [selectedPeriod, setSelectedPeriod] = useState('month');
 
   const handleBack = () => {
     navigation.goBack();
   };
 
-  // Mock statistics data
-  const statisticsData = {
-    week: {
-      booksRead: 2,
-      pagesRead: 156,
-      readingTime: 8.5,
-      averageSession: 45,
-      dailyGoal: 30,
-      dailyProgress: 85,
-    },
-    month: {
-      booksRead: 8,
-      pagesRead: 624,
-      readingTime: 34.2,
-      averageSession: 42,
-      dailyGoal: 30,
-      dailyProgress: 78,
-    },
-    year: {
-      booksRead: 45,
-      pagesRead: 3420,
-      readingTime: 187.5,
-      averageSession: 38,
-      dailyGoal: 30,
-      dailyProgress: 72,
-    },
+  const zeroStats = {
+    booksRead: 0,
+    pagesRead: 0,
+    readingTime: 0,
+    averageSession: 0,
   };
-
-  const currentStats = statisticsData[selectedPeriod];
-
-  const periods = [
-    { key: 'week', label: 'Semana' },
-    { key: 'month', label: 'Mês' },
-    { key: 'year', label: 'Ano' },
-  ];
 
   const mainStats = [
     {
       title: 'Livros Lidos',
-      value: currentStats.booksRead,
+      value: zeroStats.booksRead,
       icon: '📚',
       color: COLORS.primary,
     },
     {
       title: 'Páginas Lidas',
-      value: currentStats.pagesRead,
+      value: zeroStats.pagesRead,
       icon: '📄',
       color: COLORS.secondary,
     },
     {
       title: 'Tempo de Leitura',
-      value: `${currentStats.readingTime}h`,
+      value: `${zeroStats.readingTime}h`,
       icon: '⏰',
       color: COLORS.success,
     },
     {
       title: 'Sessão Média',
-      value: `${currentStats.averageSession}min`,
+      value: `${zeroStats.averageSession}min`,
       icon: '📊',
       color: COLORS.warning,
     },
   ];
 
-  const weeklyData = [
-    { day: 'Dom', minutes: 45, pages: 23 },
-    { day: 'Seg', minutes: 60, pages: 30 },
-    { day: 'Ter', minutes: 30, pages: 15 },
-    { day: 'Qua', minutes: 75, pages: 38 },
-    { day: 'Qui', minutes: 40, pages: 20 },
-    { day: 'Sex', minutes: 55, pages: 28 },
-    { day: 'Sáb', minutes: 80, pages: 40 },
-  ];
-
-  const maxMinutes = Math.max(...weeklyData.map(d => d.minutes));
+  
 
   return (
     <SafeAreaView style={styles.container}>
@@ -119,28 +78,7 @@ const StatisticsScreen = ({ navigation }) => {
 
         <Text style={styles.title}>Estatísticas</Text>
 
-        {/* Period Selector */}
-        <View style={styles.periodSelector}>
-          {periods.map((period) => (
-            <TouchableOpacity
-              key={period.key}
-              style={[
-                styles.periodButton,
-                selectedPeriod === period.key && styles.activePeriodButton,
-              ]}
-              onPress={() => setSelectedPeriod(period.key)}
-            >
-              <Text
-                style={[
-                  styles.periodText,
-                  selectedPeriod === period.key && styles.activePeriodText,
-                ]}
-              >
-                {period.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        
 
         {/* Main Stats Grid */}
         <View style={styles.statsGrid}>
@@ -156,73 +94,7 @@ const StatisticsScreen = ({ navigation }) => {
         </View>
 
 
-        {/* Daily Goal Progress */}
-        <View style={styles.goalCard}>
-          <View style={styles.goalHeader}>
-            <Text style={styles.goalTitle}>🎯 Meta Diária</Text>
-            <Text style={styles.goalProgress}>
-              {currentStats.dailyProgress}% concluída
-            </Text>
-          </View>
-          <View style={styles.goalBar}>
-            <View 
-              style={[
-                styles.goalFill, 
-                { width: `${currentStats.dailyProgress}%` }
-              ]} 
-            />
-          </View>
-          <Text style={styles.goalText}>
-            Meta: {currentStats.dailyGoal} minutos por dia
-          </Text>
-        </View>
-
-        {/* Weekly Chart */}
-        <View style={styles.chartCard}>
-          <Text style={styles.chartTitle}>📈 Atividade da Semana</Text>
-          <View style={styles.chart}>
-            {weeklyData.map((data, index) => {
-              const height = (data.minutes / maxMinutes) * 100;
-              return (
-                <View key={index} style={styles.chartColumn}>
-                  <View style={styles.chartBarContainer}>
-                    <View 
-                      style={[
-                        styles.chartBar, 
-                        { height: `${height}%` }
-                      ]} 
-                    />
-                  </View>
-                  <Text style={styles.chartLabel}>{data.day}</Text>
-                  <Text style={styles.chartValue}>{data.minutes}min</Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* Reading Insights */}
-        <View style={styles.insightsCard}>
-          <Text style={styles.insightsTitle}>💡 Insights</Text>
-          <View style={styles.insightItem}>
-            <Text style={styles.insightIcon}>📅</Text>
-            <Text style={styles.insightText}>
-              Você lê mais nos fins de semana
-            </Text>
-          </View>
-          <View style={styles.insightItem}>
-            <Text style={styles.insightIcon}>🌙</Text>
-            <Text style={styles.insightText}>
-              Seu horário preferido é entre 20h-22h
-            </Text>
-          </View>
-          <View style={styles.insightItem}>
-            <Text style={styles.insightIcon}>📖</Text>
-            <Text style={styles.insightText}>
-              Ficção é seu gênero favorito (65%)
-            </Text>
-          </View>
-        </View>
+        
       </ScrollView>
     </SafeAreaView>
   );

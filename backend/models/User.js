@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: true,
+    required: false,
     minlength: 6
   },
   userType: {
@@ -153,6 +153,16 @@ const userSchema = new mongoose.Schema({
       }
     }
   }
+  , maintenance: {
+    gamificationResetApplied: {
+      type: Boolean,
+      default: false
+    },
+    streakRemoved: {
+      type: Boolean,
+      default: false
+    }
+  }
 }, {
   timestamps: true
 });
@@ -160,7 +170,6 @@ const userSchema = new mongoose.Schema({
 // Hash da senha antes de salvar
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
-  
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);

@@ -49,6 +49,10 @@ router.get('/book/:bookId', authenticateToken, async (req, res) => {
 // GET /api/chapters/:id - Obter capítulo específico
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
+    const { page = 1, wordsPerPage = 500 } = req.query;
+    const perPage = Math.max(100, Math.min(parseInt(wordsPerPage) || 500, 2000));
+    const currentPage = Math.max(1, parseInt(page) || 1);
+
     const chapterDoc = await Chapter.findById(req.params.id)
       .populate('book', 'title author isActive isApproved');
     const chapter = chapterDoc;
@@ -84,6 +88,13 @@ router.get('/:id', authenticateToken, async (req, res) => {
     // Buscar capítulos anterior e próximo
     const previousChapter = await chapter.getPreviousChapter();
     const nextChapter = await chapter.getNextChapter();
+
+    // Paginação de conteúdo por palavras
+    const words = chapter.content.trim().split(/\s+/);
+    const totalPages = Math.max(1, Math.ceil(words.length / perPage));
+    const startIdx = (currentPage - 1) * perPage;
+    const endIdx = Math.min(startIdx + perPage, words.length);
+    const contentPage = words.slice(startIdx, endIdx).join(' ');
     
     chapter.navigation = {
       previous: previousChapter ? {
@@ -98,9 +109,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
       } : null
     };
     
+    const payload = chapter.toObject();
+    payload.content = contentPage;
+    payload.pagination = { page: currentPage, totalPages, wordsPerPage: perPage };
     res.json({
       message: 'Capítulo obtido com sucesso',
-      chapter: chapter.toObject()
+      chapter: payload
     });
   } catch (error) {
     console.error('Erro ao obter capítulo:', error);
@@ -442,6 +456,7 @@ router.post('/:id/answer', authenticateToken, [
                               chapter.questions[questionIndex].difficulty === 'medium' ? 10 : 5;
       
       await req.user.addExperience(experienceGained);
+      await req.user.save();
     }
     
     res.json({
@@ -485,6 +500,7 @@ router.put('/:id/read', authenticateToken, async (req, res) => {
     // Adicionar experiência
     const experienceGained = 10;
     await req.user.addExperience(experienceGained);
+    await req.user.save();
     
     // Atualizar estatísticas do capítulo
     await chapter.updateStatistics('read');

@@ -213,8 +213,8 @@ router.get('/:id/reading-stats', authenticateToken, requireOwnershipOrLibrarian,
         ? Math.round(readingProgress.reduce((sum, p) => sum + p.progressPercentage, 0) / readingProgress.length)
         : 0,
       favoriteGenres: {},
-      readingStreak: req.user.gamification.streak.current,
-      longestStreak: req.user.gamification.streak.longest
+      readingStreak: 0,
+      longestStreak: 0
     };
     
     // Calcular gêneros favoritos
@@ -258,10 +258,14 @@ router.get('/:id/achievements', authenticateToken, requireOwnershipOrLibrarian, 
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
     
+    const resetApplied = user.maintenance?.gamificationResetApplied;
+    const removedIds = new Set(['consistent_reader','note_taker','challenge_seeker','genre_explorer']);
+    const achievements = resetApplied ? [] : (user.gamification.achievements || []).filter(a => !removedIds.has(a.id || a.achievementId));
+    const badges = resetApplied ? [] : (user.gamification.badges || []);
     res.json({
       message: 'Conquistas obtidas com sucesso',
-      achievements: user.gamification.achievements,
-      badges: user.gamification.badges,
+      achievements,
+      badges,
       level: user.gamification.level,
       experience: user.gamification.experience
     });

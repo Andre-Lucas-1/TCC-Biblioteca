@@ -46,11 +46,45 @@ function mapSubjectToGenre(subjects) {
 
 function stripGutenbergBoilerplate(text) {
   if (!text) return '';
-  let t = text.replace(/\r\n/g, '\n');
-  const startIdx = t.search(/\*+\s*START OF (THIS|THE) PROJECT GUTENBERG/i);
-  const endIdx = t.search(/\*+\s*END OF (THIS|THE) PROJECT GUTENBERG/i);
-  if (startIdx >= 0) t = t.slice(startIdx);
-  if (endIdx > 0) t = t.slice(0, endIdx);
+  let t = String(text).replace(/\r\n/g, '\n');
+  // Remover BOM
+  t = t.replace(/^\uFEFF/, '');
+  // Remover cabeçalho padrão
+  const startRe = /(?:\*{3}|===)\s*START OF (?:THIS|THE) PROJECT GUTENBERG EBOOK[\s\S]*?\n/mi;
+  const startMatch = t.match(startRe);
+  if (startMatch) {
+    const headerEnd = t.indexOf(startMatch[0]) + startMatch[0].length;
+    const blankAfterHeader = t.indexOf('\n\n', headerEnd);
+    const contentStart = blankAfterHeader > -1 ? blankAfterHeader + 2 : headerEnd;
+    t = t.slice(contentStart);
+  }
+  // Se não encontrou START, cortar após primeiro bloco com "Project Gutenberg" próximo do topo
+  if (!startMatch) {
+    const pgIdx = t.slice(0, 8000).search(/Project Gutenberg/i);
+    if (pgIdx >= 0) {
+      const blankAfterPg = t.indexOf('\n\n', pgIdx);
+      if (blankAfterPg > -1) t = t.slice(blankAfterPg + 2);
+    }
+  }
+  // Remover rodapé padrão
+  const endRe = /(?:\*{3}|===)\s*END OF (?:THIS|THE) PROJECT GUTENBERG EBOOK[\s\S]*$/mi;
+  const endMatch = t.match(endRe);
+  if (endMatch) {
+    const footerStart = t.indexOf(endMatch[0]);
+    t = t.slice(0, footerStart);
+  }
+  // Remover outra forma de rodapé
+  const endAltIdx = t.search(/End of (?:the|this) Project Gutenberg EBook/i);
+  if (endAltIdx > -1) {
+    t = t.slice(0, endAltIdx);
+  }
+  // Remover linhas de créditos comuns no topo
+  t = t.replace(/^\s*Produced by[\s\S]*?\n\n/mi, '');
+  t = t.replace(/^\s*Online Distributed Proofreading Team.*\n/mi, '');
+  t = t.replace(/^\s*Title:\s.*\n/mi, '');
+  t = t.replace(/^\s*Release date:\s.*\n/mi, '');
+  t = t.replace(/^\s*Language:\s.*\n/mi, '');
+  t = t.replace(/^\s*Translator:\s.*\n/mi, '');
   return t.trim();
 }
 
@@ -83,6 +117,33 @@ function splitFixed(raw, chunkSize = 1200) {
   const chapters = [];
   for (let i = 0; i < words.length; i += chunkSize) {
     chapters.push(words.slice(i, Math.min(i + chunkSize, words.length)).join(' '));
+  }
+  return chapters;
+}
+
+function splitBibleBooks(raw) {
+  const names = [
+    'Genesis','Exodo','Levitico','Numeros','Deuteronomio','Josu[eé]','Ju[ií]zes','Ruth','I\s*Samuel','II\s*Samuel',
+    'I\s*Reis','II\s*Reis','I\s*Chronicas','II\s*Chronicas','Esdras','Nehemias','Esther','Job','Psalmos',
+    'Proverbios','Ecclesiastes','Cantico dos Canticos','Isaias','Jeremias','Lament[aá]ções','Ezequiel','Daniel',
+    'Oseas','Joel','Am[oó]s','Obadias','Jonas','Miqueas','Nahum','Habacuc','Sofonias','Aggeo','Zacharias','Malachias',
+    'Mateus','Marcos','Lucas','Jo[aã]o','Actos','Romanos','Cor[ií]ntios','G[aá]latas','Ephesios','Philippenses','Colossenses',
+    'Thessalonicenses','Timotheo','Tito','Philemon','Hebreus','Th[ií]ago','Pedro','Jo[aã]o','Judas','Apocalipse'
+  ];
+  const pattern = new RegExp(`(^|\n)\s*(${names.join('|')})\b`, 'gi');
+  const chapters = [];
+  let match;
+  const indexes = [];
+  while ((match = pattern.exec(raw)) !== null) {
+    indexes.push({ idx: match.index + (match[1] ? match[1].length : 0), title: match[2] });
+  }
+  for (let i = 0; i < indexes.length; i++) {
+    const start = indexes[i].idx;
+    const end = i + 1 < indexes.length ? indexes[i + 1].idx : raw.length;
+    const content = raw.slice(start, end).trim();
+    if (content.length > 0) {
+      chapters.push({ title: indexes[i].title, content });
+    }
   }
   return chapters;
 }
@@ -202,7 +263,18 @@ router.post('/import/:id', authenticateToken, async (req, res) => {
       return res.status(422).json({ message: 'Conteúdo insuficiente para importar' });
     }
 
-    let chaptersText = splitIntoChapters(rawText);
+    let chaptersText;
+    let byBooksRef = null;
+    if (titleLower.includes('biblia') || subjLower.some(s => s.includes('bible'))) {
+      const byBooks = splitBibleBooks(rawText);
+      if (byBooks.length) {
+        byBooksRef = byBooks;
+        chaptersText = byBooks.map(b => b.content);
+      }
+    }
+    if (!chaptersText) {
+      chaptersText = splitIntoChapters(rawText);
+    }
     if (!chaptersText.length) {
       chaptersText = splitFixed(rawText, 1200);
       if (!chaptersText.length) {
@@ -265,6 +337,12 @@ router.post('/import/:id', authenticateToken, async (req, res) => {
     for (let i = 0; i < chaptersText.length; i++) {
       const text = chaptersText[i];
       let titleCandidate = (text.split(/\n|\.\s/)[0] || '').trim();
+      if (byBooksRef && byBooksRef[i]?.title) {
+        titleCandidate = byBooksRef[i].title;
+      } else if ((titleLower.includes('biblia') || subjLower.some(s => s.includes('bible'))) && titleCandidate) {
+        const t = titleCandidate.match(/^(Genesis|Exodo|Levitico|Numeros|Deuteronomio|Josu[eé]|Ju[ií]zes|Ruth|I\s*Samuel|II\s*Samuel|I\s*Reis|II\s*Reis|I\s*Chronicas|II\s*Chronicas|Esdras|Nehemias|Esther|Job|Psalmos|Proverbios|Ecclesiastes|Cantico dos Canticos|Isaias|Jeremias|Lament[aá]ções|Ezequiel|Daniel|Oseas|Joel|Am[oó]s|Obadias|Jonas|Miqueas|Nahum|Habacuc|Sofonias|Aggeo|Zacharias|Malachias|Mateus|Marcos|Lucas|Jo[aã]o|Actos|Romanos|Cor[ií]ntios|G[aá]latas|Ephesios|Philippenses|Colossenses|Thessalonicenses|Timotheo|Tito|Philemon|Hebreus|Th[ií]ago|Pedro|Jo[aã]o|Judas|Apocalipse)\b/i);
+        if (t) titleCandidate = t[0];
+      }
       if (/project gutenberg|start of/i.test(titleCandidate) || titleCandidate.length < 4) {
         titleCandidate = '';
       }
@@ -292,6 +370,78 @@ router.post('/import/:id', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Erro na importação Gutendex:', error);
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
+// Reimportar um livro já existente (limpa cabeçalhos e recria capítulos)
+router.post('/reimport/:bookId', authenticateToken, async (req, res) => {
+  try {
+    const book = await Book.findById(req.params.bookId);
+    if (!book) return res.status(404).json({ message: 'Livro não encontrado' });
+    if (!book.isExternal || book.source !== 'gutendex' || !book.externalId) {
+      return res.status(400).json({ message: 'Livro não é externo da Gutendex' });
+    }
+
+    let response;
+    try {
+      response = await gutendexAPI.get(`/books/${book.externalId}`);
+    } catch (e) {
+      return res.status(502).json({ message: 'Falha ao consultar Gutendex' });
+    }
+    const gutBook = normalizeGutendexBook(response.data);
+    if (!gutBook?.textUrl) return res.status(422).json({ message: 'Livro sem formato text/plain disponível' });
+
+    let txtResp;
+    try {
+      txtResp = await axios.get(gutBook.textUrl, { responseType: 'text', headers: { 'User-Agent': 'LeiaApp/1.0 (Educational Reading App)' } });
+    } catch (e) {
+      return res.status(502).json({ message: 'Falha ao baixar conteúdo do livro (txt)' });
+    }
+
+    const rawText = stripGutenbergBoilerplate(txtResp.data);
+    const totalWords = rawText.trim().split(/\s+/).length;
+    if (totalWords < 200) return res.status(422).json({ message: 'Conteúdo insuficiente para reimportar' });
+
+    const titleLower = (gutBook.title || '').toLowerCase();
+    const subjLower = (gutBook.subjects || []).map(s => String(s).toLowerCase());
+    let chaptersText;
+    let byBooksRef = null;
+    if (titleLower.includes('biblia') || subjLower.some(s => s.includes('bible'))) {
+      const byBooks = splitBibleBooks(rawText);
+      if (byBooks.length) { byBooksRef = byBooks; chaptersText = byBooks.map(b => b.content); }
+    }
+    if (!chaptersText) {
+      chaptersText = splitIntoChapters(rawText);
+      if (!chaptersText.length) chaptersText = splitFixed(rawText, 1200);
+      if (!chaptersText.length) return res.status(422).json({ message: 'Não foi possível segmentar o livro em capítulos' });
+    }
+
+    // Atualizar metadados do livro
+    const pageCount = Math.ceil(totalWords / 300);
+    const estimatedReadingTime = Math.max(10, Math.ceil(totalWords / 200));
+    book.totalChapters = chaptersText.length;
+    book.pageCount = pageCount;
+    book.estimatedReadingTime = estimatedReadingTime;
+    await book.save();
+
+    // Remover capítulos existentes e recriar
+    await Chapter.deleteMany({ book: book._id });
+    let order = 1;
+    const createdChapters = [];
+    for (let i = 0; i < chaptersText.length; i++) {
+      const text = chaptersText[i];
+      let titleCandidate = (text.split(/\n|\.\s/)[0] || '').trim();
+      if (byBooksRef && byBooksRef[i]?.title) titleCandidate = byBooksRef[i].title;
+      if (/project gutenberg|start of/i.test(titleCandidate) || titleCandidate.length < 4) titleCandidate = '';
+      const chapterTitle = titleCandidate ? titleCandidate.slice(0, 60) : `Capítulo ${i + 1}`;
+      const chapter = new Chapter({ book: book._id, title: chapterTitle, chapterNumber: i + 1, content: text, order: order++, isActive: true });
+      await chapter.save();
+      createdChapters.push({ _id: chapter._id, title: chapter.title, chapterNumber: chapter.chapterNumber });
+    }
+
+    res.json({ message: 'Livro reprocessado com sucesso', book: { _id: book._id, title: book.title, totalChapters: book.totalChapters }, chapters: createdChapters });
+  } catch (error) {
     res.status(500).json({ message: 'Erro interno do servidor' });
   }
 });

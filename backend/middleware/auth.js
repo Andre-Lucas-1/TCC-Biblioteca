@@ -41,7 +41,55 @@ const authenticateToken = async (req, res, next) => {
       }
     }
     req.user = user || decoded;
-    if (!req.user._id && decoded.userId) req.user._id = decoded.userId;
+    if (user) {
+      let changed = false;
+      const removedIds = new Set(['consistent_reader','note_taker','challenge_seeker','genre_explorer']);
+      if (Array.isArray(user.gamification?.achievements)) {
+        const filtered = user.gamification.achievements.filter(a => !removedIds.has(a.id || a.achievementId));
+        if (filtered.length !== user.gamification.achievements.length) {
+          user.gamification.achievements = filtered;
+          changed = true;
+        }
+      }
+      const resetAt = user.maintenance?.gamificationResetAt ? new Date(user.maintenance.gamificationResetAt) : null;
+      if (resetAt && Array.isArray(user.gamification?.achievements)) {
+        const filtered = user.gamification.achievements.filter(a => {
+          const unlocked = a.unlockedAt ? new Date(a.unlockedAt) : null;
+          return unlocked && unlocked > resetAt;
+        });
+        if (filtered.length !== user.gamification.achievements.length) {
+          user.gamification.achievements = filtered;
+          changed = true;
+        }
+      }
+      if (resetAt && Array.isArray(user.gamification?.badges)) {
+        const filteredB = user.gamification.badges.filter(b => {
+          const earned = b.earnedAt ? new Date(b.earnedAt) : null;
+          return earned && earned > resetAt;
+        });
+        if (filteredB.length !== user.gamification.badges.length) {
+          user.gamification.badges = filteredB;
+          changed = true;
+        }
+      }
+      if (!user.maintenance?.gamificationResetApplied) {
+        user.gamification.experience = 0;
+        user.gamification.level = 1;
+        user.gamification.achievements = [];
+        user.gamification.badges = [];
+        user.gamification.streak.current = 0;
+        user.gamification.streak.longest = 0;
+        user.gamification.streak.lastReadDate = null;
+        user.maintenance = user.maintenance || {};
+        user.maintenance.gamificationResetApplied = true;
+        user.maintenance.gamificationResetAt = new Date();
+        user.maintenance.streakRemoved = true;
+        changed = true;
+      }
+      if (changed) {
+        await user.save();
+      }
+    }
     next();
     
   } catch (error) {

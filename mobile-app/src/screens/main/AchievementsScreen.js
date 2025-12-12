@@ -12,82 +12,37 @@ import {
 import { useDispatch, useSelector } from 'react-redux';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { Logo } from '../../components';
+import { fetchAchievements } from '../../store/slices/gamificationSlice';
+import { selectAchievements } from '../../store/slices/gamificationSlice';
 
 const AchievementsScreen = ({ navigation }) => {
   const dispatch = useDispatch();
+  const achievementsState = useSelector(selectAchievements);
 
   const handleBack = () => {
     navigation.goBack();
   };
 
-  // Mock achievements data
-  const achievements = [
-    {
-      id: 1,
-      title: 'Primeiro Livro',
-      description: 'Complete sua primeira leitura',
-      icon: '📚',
-      unlocked: true,
-      progress: 100,
-      maxProgress: 100,
-      xpReward: 50,
-      unlockedAt: '2024-01-15',
-    },
-    {
-      id: 2,
-      title: 'Leitor Dedicado',
-      description: 'Leia por 7 dias consecutivos',
-      icon: '🔥',
-      unlocked: true,
-      progress: 100,
-      maxProgress: 100,
-      xpReward: 100,
-      unlockedAt: '2024-01-22',
-    },
-    {
-      id: 3,
-      title: 'Explorador de Gêneros',
-      description: 'Leia livros de 5 gêneros diferentes',
-      icon: '🌟',
-      unlocked: false,
-      progress: 3,
-      maxProgress: 5,
-      xpReward: 150,
-    },
-    {
-      id: 4,
-      title: 'Maratonista',
-      description: 'Leia 10 livros em um mês',
-      icon: '🏃‍♂️',
-      unlocked: false,
-      progress: 2,
-      maxProgress: 10,
-      xpReward: 200,
-    },
-    {
-      id: 5,
-      title: 'Crítico Literário',
-      description: 'Avalie 20 livros',
-      icon: '⭐',
-      unlocked: false,
-      progress: 8,
-      maxProgress: 20,
-      xpReward: 75,
-    },
-    {
-      id: 6,
-      title: 'Colecionador',
-      description: 'Adicione 50 livros à sua biblioteca',
-      icon: '📖',
-      unlocked: false,
-      progress: 23,
-      maxProgress: 50,
-      xpReward: 100,
-    },
-  ];
+  useEffect(() => {
+    dispatch(fetchAchievements());
+  }, [dispatch]);
 
-  const unlockedAchievements = achievements.filter(a => a.unlocked);
-  const lockedAchievements = achievements.filter(a => !a.unlocked);
+  const allAchievements = (achievementsState.available || []).map(a => ({
+    id: a.id,
+    title: a.name,
+    description: a.description,
+    icon: a.icon || '📘',
+    unlocked: !!a.unlocked,
+    progress: a.progress || 0,
+    maxProgress: a.maxProgress || 1,
+    xpReward: a.experience || 0,
+    unlockedAt: a.unlockedAt || null,
+  }));
+  const removedIds = new Set(['note_taker','challenge_seeker','genre_explorer']);
+  const visibleAchievements = allAchievements.filter(a => !removedIds.has(a.id));
+
+  const unlockedAchievements = visibleAchievements.filter(a => a.unlocked);
+  const lockedAchievements = visibleAchievements.filter(a => !a.unlocked);
 
   const renderAchievement = ({ item }) => {
     const progressPercentage = (item.progress / item.maxProgress) * 100;
@@ -168,12 +123,12 @@ const AchievementsScreen = ({ navigation }) => {
             <Text style={styles.statLabel}>Desbloqueadas</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{achievements.length}</Text>
+            <Text style={styles.statNumber}>{visibleAchievements.length}</Text>
             <Text style={styles.statLabel}>Total</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>
-              {Math.round((unlockedAchievements.length / achievements.length) * 100)}%
+              {visibleAchievements.length > 0 ? Math.round((unlockedAchievements.length / visibleAchievements.length) * 100) : 0}%
             </Text>
             <Text style={styles.statLabel}>Progresso</Text>
           </View>

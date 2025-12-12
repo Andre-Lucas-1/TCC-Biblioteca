@@ -1,11 +1,12 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authAPI } from '../../services/api';
+import { resetGamificationState, fetchGamificationProfile, fetchAchievements, fetchBadges } from './gamificationSlice';
 
 // Async thunks
 export const loginUser = createAsyncThunk(
   'auth/loginUser',
-  async ({ email, password }, { rejectWithValue }) => {
+  async ({ email, password }, { dispatch, rejectWithValue }) => {
     try {
       const response = await authAPI.login({email, password});
       
@@ -13,6 +14,7 @@ export const loginUser = createAsyncThunk(
       await AsyncStorage.setItem('authToken', response.data.token);
       await AsyncStorage.setItem('userData', JSON.stringify(response.data.user));
       
+      dispatch(resetGamificationState());
       return response.data;
     } catch (error) {
       return rejectWithValue(
@@ -24,7 +26,7 @@ export const loginUser = createAsyncThunk(
 
 export const registerUser = createAsyncThunk(
   'auth/registerUser',
-  async (userData, { rejectWithValue }) => {
+  async (userData, { dispatch, rejectWithValue }) => {
     try {
       const response = await authAPI.register(userData);
       
@@ -32,6 +34,7 @@ export const registerUser = createAsyncThunk(
       await AsyncStorage.setItem('authToken', response.data.token);
       await AsyncStorage.setItem('userData', JSON.stringify(response.data.user));
       
+      dispatch(resetGamificationState());
       return response.data;
     } catch (error) {
       return rejectWithValue(
@@ -43,10 +46,11 @@ export const registerUser = createAsyncThunk(
 
 export const logoutUser = createAsyncThunk(
   'auth/logoutUser',
-  async (_, { rejectWithValue }) => {
+  async (_, { dispatch, rejectWithValue }) => {
     try {
       // Remover dados do AsyncStorage
       await AsyncStorage.multiRemove(['authToken', 'userData']);
+      dispatch(resetGamificationState());
       return true;
     } catch (error) {
       return rejectWithValue('Erro ao fazer logout');
@@ -56,12 +60,16 @@ export const logoutUser = createAsyncThunk(
 
 export const loadUserFromStorage = createAsyncThunk(
   'auth/loadUserFromStorage',
-  async (_, { rejectWithValue }) => {
+  async (_, { dispatch, rejectWithValue }) => {
     try {
       const token = await AsyncStorage.getItem('authToken');
       const userData = await AsyncStorage.getItem('userData');
       
       if (token && userData) {
+        dispatch(resetGamificationState());
+        dispatch(fetchGamificationProfile());
+        dispatch(fetchAchievements());
+        dispatch(fetchBadges());
         return {
           token,
           user: JSON.parse(userData)

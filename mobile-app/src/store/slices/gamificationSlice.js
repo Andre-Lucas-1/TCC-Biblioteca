@@ -175,6 +175,9 @@ const gamificationSlice = createSlice({
       state.experienceGained = 0;
       state.levelUp = false;
     },
+    resetGamificationState: (state) => {
+      Object.assign(state, initialState);
+    },
     addExperience: (state, action) => {
       const experience = action.payload;
       const oldLevel = state.profile.level;
@@ -317,9 +320,7 @@ const gamificationSlice = createSlice({
         // Adicionar novas conquistas
         if (newAchievements && newAchievements.length > 0) {
           newAchievements.forEach(achievement => {
-            const alreadyUnlocked = state.achievements.unlocked.find(
-              a => a.id === achievement.id
-            );
+            const alreadyUnlocked = state.achievements.unlocked.find(a => a.id === achievement.id);
             if (!alreadyUnlocked) {
               state.achievements.unlocked.push({
                 ...achievement,
@@ -327,6 +328,9 @@ const gamificationSlice = createSlice({
               });
               state.newAchievements.push(achievement);
             }
+            state.achievements.available = (state.achievements.available || []).map(av =>
+              av.id === achievement.id ? { ...av, unlocked: true, unlockedAt: new Date().toISOString() } : av
+            );
           });
         }
         
@@ -416,6 +420,7 @@ export const {
   unlockAchievement,
   unlockBadge,
   updateAchievementProgress,
+  resetGamificationState,
 } = gamificationSlice.actions;
 
 // Selectors

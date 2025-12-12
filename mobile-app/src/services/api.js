@@ -25,6 +25,10 @@ const api = axios.create({
 api.interceptors.request.use(
   async (config) => {
     try {
+      const storedBase = await AsyncStorage.getItem('apiBaseUrl');
+      if (storedBase && storedBase.length > 0) {
+        config.baseURL = storedBase;
+      }
       const token = await AsyncStorage.getItem('authToken');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -105,6 +109,15 @@ api.interceptors.response.use(
       }
     }
 
+    if (!originalRequest) return Promise.reject(error);
+    const storedBase = await AsyncStorage.getItem('apiBaseUrl');
+    const isNetwork = !error.response;
+    if (isNetwork && !originalRequest._retryBase) {
+      originalRequest._retryBase = true;
+      const fallback = API_BASE_URL;
+      originalRequest.baseURL = storedBase && storedBase.length > 0 ? storedBase : fallback;
+      return api(originalRequest);
+    }
     return Promise.reject(error);
   }
 );
@@ -158,7 +171,7 @@ export const booksAPI = {
 // Serviços de Capítulos
 export const chaptersAPI = {
   getChapters: (bookId) => api.get(`/chapters/book/${bookId}`),
-  getChapter: (chapterId) => api.get(`/chapters/${chapterId}`),
+  getChapter: (chapterId, page = 1, wordsPerPage = 500) => api.get(`/chapters/${chapterId}`, { params: { page, wordsPerPage } }),
   markRead: (chapterId) => api.put(`/chapters/${chapterId}/read`),
 };
 
@@ -289,6 +302,21 @@ export const apiUtils = {
       console.error('Erro ao salvar dados do usuário:', error);
     }
   },
+  setApiBaseUrl: async (url) => {
+    try {
+      await AsyncStorage.setItem('apiBaseUrl', url);
+    } catch (error) {
+      console.error('Erro ao salvar API base URL:', error);
+    }
+  },
+  getApiBaseUrl: async () => {
+    try {
+      const url = await AsyncStorage.getItem('apiBaseUrl');
+      return url || API_BASE_URL;
+    } catch (error) {
+      return API_BASE_URL;
+    }
+  }
 };
 
 export default api;

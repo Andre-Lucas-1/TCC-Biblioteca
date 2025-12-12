@@ -4,7 +4,7 @@ const ReadingProgress = require('../models/ReadingProgress');
 const Book = require('../models/Book');
 const Chapter = require('../models/Chapter');
 const User = require('../models/User');
-const { authenticateToken, requireOwnershipOrLibrarian } = require('../middleware/auth');
+const { authenticateToken, requireOwnershipOrLibrarian, requireResourceAccess } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -142,8 +142,8 @@ router.post('/start', authenticateToken, [
     
     await progress.populate('book', 'title author coverImage genre difficulty totalChapters');
     
-    // Adicionar experiência por iniciar um livro
     await req.user.addExperience(5);
+    await req.user.save();
     
     res.status(201).json({
       message: 'Leitura iniciada com sucesso',
@@ -157,7 +157,7 @@ router.post('/start', authenticateToken, [
 });
 
 // PUT /api/progress/:id/session/start - Iniciar sessão de leitura
-router.put('/:id/session/start', authenticateToken, requireOwnershipOrLibrarian, async (req, res) => {
+router.put('/:id/session/start', authenticateToken, requireResourceAccess('progress'), async (req, res) => {
   try {
     const progress = await ReadingProgress.findById(req.params.id);
     if (!progress) {
@@ -177,7 +177,7 @@ router.put('/:id/session/start', authenticateToken, requireOwnershipOrLibrarian,
 });
 
 // PUT /api/progress/:id/session/end - Finalizar sessão de leitura
-router.put('/:id/session/end', authenticateToken, requireOwnershipOrLibrarian, [
+router.put('/:id/session/end', authenticateToken, requireResourceAccess('progress'), [
   body('readingTime')
     .optional()
     .isInt({ min: 1 })
@@ -213,9 +213,7 @@ router.put('/:id/session/end', authenticateToken, requireOwnershipOrLibrarian, [
     if (experienceGained > 0) {
       await req.user.addExperience(experienceGained);
     }
-    
-    // Atualizar streak de leitura
-    await req.user.updateReadingStreak();
+    await req.user.save();
     
     res.json({
       message: 'Sessão de leitura finalizada',
@@ -230,7 +228,7 @@ router.put('/:id/session/end', authenticateToken, requireOwnershipOrLibrarian, [
 });
 
 // PUT /api/progress/:id/chapter/:chapterId/complete - Marcar capítulo como completo
-router.put('/:id/chapter/:chapterId/complete', authenticateToken, requireOwnershipOrLibrarian, async (req, res) => {
+router.put('/:id/chapter/:chapterId/complete', authenticateToken, requireResourceAccess('progress'), async (req, res) => {
   try {
     const progress = await ReadingProgress.findById(req.params.id);
     if (!progress) {
@@ -252,6 +250,7 @@ router.put('/:id/chapter/:chapterId/complete', authenticateToken, requireOwnersh
     // Adicionar experiência por completar capítulo
     const experienceGained = 20;
     await req.user.addExperience(experienceGained);
+    await req.user.save();
     
     // Atualizar estatísticas do capítulo
     await chapter.updateStatistics('completed');
@@ -269,8 +268,8 @@ router.put('/:id/chapter/:chapterId/complete', authenticateToken, requireOwnersh
       progress.completedAt = new Date();
       await progress.save();
       
-      // Experiência extra por completar o livro
       await req.user.addExperience(100);
+      await req.user.save();
       bookCompleted = true;
     }
     
@@ -287,7 +286,7 @@ router.put('/:id/chapter/:chapterId/complete', authenticateToken, requireOwnersh
 });
 
 // PUT /api/progress/:id/status - Atualizar status do progresso
-router.put('/:id/status', authenticateToken, requireOwnershipOrLibrarian, [
+router.put('/:id/status', authenticateToken, requireResourceAccess('progress'), [
   body('status')
     .isIn(['reading', 'paused', 'completed', 'abandoned'])
     .withMessage('Status deve ser: reading, paused, completed ou abandoned')
@@ -309,11 +308,10 @@ router.put('/:id/status', authenticateToken, requireOwnershipOrLibrarian, [
     const oldStatus = progress.status;
     progress.status = req.body.status;
     
-    // Definir data de conclusão se necessário
     if (req.body.status === 'completed' && oldStatus !== 'completed') {
       progress.completedAt = new Date();
-      // Adicionar experiência por completar o livro
       await req.user.addExperience(100);
+      await req.user.save();
     } else if (req.body.status === 'abandoned' && oldStatus !== 'abandoned') {
       progress.abandonedAt = new Date();
     }
@@ -332,7 +330,7 @@ router.put('/:id/status', authenticateToken, requireOwnershipOrLibrarian, [
 });
 
 // POST /api/progress/:id/favorite - Adicionar/remover dos favoritos
-router.post('/:id/favorite', authenticateToken, requireOwnershipOrLibrarian, async (req, res) => {
+router.post('/:id/favorite', authenticateToken, requireResourceAccess('progress'), async (req, res) => {
   try {
     const progress = await ReadingProgress.findById(req.params.id);
     if (!progress) {
@@ -353,7 +351,7 @@ router.post('/:id/favorite', authenticateToken, requireOwnershipOrLibrarian, asy
 });
 
 // POST /api/progress/:id/note - Adicionar nota
-router.post('/:id/note', authenticateToken, requireOwnershipOrLibrarian, [
+router.post('/:id/note', authenticateToken, requireResourceAccess('progress'), [
   body('content')
     .trim()
     .notEmpty()
@@ -401,7 +399,7 @@ router.post('/:id/note', authenticateToken, requireOwnershipOrLibrarian, [
 });
 
 // GET /api/progress/:id/notes - Obter notas do progresso
-router.get('/:id/notes', authenticateToken, requireOwnershipOrLibrarian, async (req, res) => {
+router.get('/:id/notes', authenticateToken, requireResourceAccess('progress'), async (req, res) => {
   try {
     const progress = await ReadingProgress.findById(req.params.id)
       .populate('notes.chapterId', 'title chapterNumber')
@@ -423,7 +421,7 @@ router.get('/:id/notes', authenticateToken, requireOwnershipOrLibrarian, async (
 });
 
 // DELETE /api/progress/:id/note/:noteId - Excluir nota
-router.delete('/:id/note/:noteId', authenticateToken, requireOwnershipOrLibrarian, async (req, res) => {
+router.delete('/:id/note/:noteId', authenticateToken, requireResourceAccess('progress'), async (req, res) => {
   try {
     const progress = await ReadingProgress.findById(req.params.id);
     if (!progress) {
@@ -477,8 +475,8 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
         medium: 0,
         hard: 0
       },
-      readingStreak: req.user.gamification.streak.current,
-      longestStreak: req.user.gamification.streak.longest,
+      readingStreak: 0,
+      longestStreak: 0,
       level: req.user.gamification.level,
       experience: req.user.gamification.experience
     };

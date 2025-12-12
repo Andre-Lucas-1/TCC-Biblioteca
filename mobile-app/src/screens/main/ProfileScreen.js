@@ -14,17 +14,20 @@ import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { logoutUser } from '../../store/slices/authSlice';
 import { Logo } from '../../components';
 import { fetchUserProfile, fetchUserStats } from '../../store/slices/userSlice';
+import { fetchAchievements, selectAchievements } from '../../store/slices/gamificationSlice';
 
 
 const ProfileScreen = ({ navigation }) => {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
   const { profile, stats } = useSelector((state) => state.user);
+  const achievementsState = useSelector(selectAchievements);
 
   useEffect(() => {
     // Carregar dados do perfil
     dispatch(fetchUserProfile());
     dispatch(fetchUserStats());
+    dispatch(fetchAchievements());
   }, [dispatch]);
 
   const handleLogout = () => {
@@ -152,28 +155,31 @@ const ProfileScreen = ({ navigation }) => {
 
 
 
-        {/* Recent Achievements */}
-        <View style={styles.achievementsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Conquistas Recentes</Text>
-            <TouchableOpacity onPress={handleAchievements}>
-              <Text style={styles.seeAllText}>Ver todas</Text>
-            </TouchableOpacity>
+        {Array.isArray(achievementsState.unlocked) && achievementsState.unlocked.length > 0 && (
+          <View style={styles.achievementsSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Conquistas Recentes</Text>
+              <TouchableOpacity onPress={handleAchievements}>
+                <Text style={styles.seeAllText}>Ver todas</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.achievementsScroll}
+            >
+              {achievementsState.unlocked.slice(0, 8).map((a) => {
+                const icon = a.icon || (achievementsState.available || []).find(av => av.id === a.id)?.icon || '🏆';
+                return (
+                  <View key={a.id} style={styles.achievementItem}>
+                    <Text style={styles.achievementIcon}>{icon}</Text>
+                    <Text style={styles.achievementTitle}>{a.name}</Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
           </View>
-          
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.achievementsScroll}
-          >
-            {[1, 2, 3, 4].map((item) => (
-              <View key={item} style={styles.achievementItem}>
-                <Text style={styles.achievementIcon}>🏆</Text>
-                <Text style={styles.achievementTitle}>Conquista {item}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
+        )}
 
         {/* Menu Items */}
         <View style={styles.menuSection}>

@@ -29,6 +29,8 @@ const ReadingScreen = ({ navigation, route }) => {
   const [textColor, setTextColor] = useState(COLORS.text);
   const [showSettings, setShowSettings] = useState(false);
   const [chapter, setChapter] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [readingTime, setReadingTime] = useState(0);
   const [showAchievementModal, setShowAchievementModal] = useState(false);
 
@@ -40,8 +42,9 @@ const ReadingScreen = ({ navigation, route }) => {
     const load = async () => {
       if (chapterId) {
         try {
-          const res = await chaptersAPI.getChapter(chapterId);
+          const res = await chaptersAPI.getChapter(chapterId, currentPage, 600);
           setChapter(res.data.chapter);
+          setTotalPages(res.data.chapter?.pagination?.totalPages || 1);
         } catch (e) {}
       }
     };
@@ -56,6 +59,16 @@ const ReadingScreen = ({ navigation, route }) => {
     if (!targetId) return;
     try { await chaptersAPI.markRead(chapterId); } catch {}
     navigation.replace('ReadingScreen', { bookId, chapterId: targetId });
+  };
+
+  const goToPage = async (nextPage) => {
+    if (nextPage < 1 || nextPage > totalPages) return;
+    try {
+      const res = await chaptersAPI.getChapter(chapterId, nextPage, 600);
+      setChapter(res.data.chapter);
+      setCurrentPage(nextPage);
+      setTotalPages(res.data.chapter?.pagination?.totalPages || totalPages);
+    } catch {}
   };
 
   const handleFontSizeChange = (change) => {
@@ -123,19 +136,36 @@ const ReadingScreen = ({ navigation, route }) => {
       {/* Navigation */}
       <View style={[styles.navigation, { backgroundColor }]}>
         <TouchableOpacity 
+          style={[styles.navButton, currentPage === 1 && styles.navButtonDisabled]}
+          onPress={() => goToPage(currentPage - 1)}
+          disabled={currentPage === 1}
+        >
+          <Text style={[styles.navButtonText, { color: textColor }]}>‹ Página</Text>
+        </TouchableOpacity>
+        <Text style={[styles.navButtonText, { color: textColor }]}>Página {currentPage} / {totalPages}</Text>
+        <TouchableOpacity 
+          style={[styles.navButton, currentPage === totalPages && styles.navButtonDisabled]}
+          onPress={() => goToPage(currentPage + 1)}
+          disabled={currentPage === totalPages}
+        >
+          <Text style={[styles.navButtonText, { color: textColor }]}>Página ›</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={[styles.navigation, { backgroundColor }]}>
+        <TouchableOpacity 
           style={[styles.navButton, !chapter?.navigation?.previous && styles.navButtonDisabled]}
           onPress={() => goToChapter(chapter?.navigation?.previous?._id)}
           disabled={!chapter?.navigation?.previous}
         >
-          <Text style={[styles.navButtonText, { color: textColor }]}>‹ Anterior</Text>
+          <Text style={[styles.navButtonText, { color: textColor }]}>‹ Capítulo</Text>
         </TouchableOpacity>
-        
         <TouchableOpacity 
           style={styles.navButton}
           onPress={() => goToChapter(chapter?.navigation?.next?._id)}
           disabled={!chapter?.navigation?.next}
         >
-          <Text style={[styles.navButtonText, { color: textColor }]}>Próxima ›</Text>
+          <Text style={[styles.navButtonText, { color: textColor }]}>Capítulo ›</Text>
         </TouchableOpacity>
       </View>
 
