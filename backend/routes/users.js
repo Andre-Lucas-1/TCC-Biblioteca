@@ -27,6 +27,31 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/users/stats - Estatísticas agregadas do usuário logado
+router.get('/stats', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const booksRead = await ReadingProgress.countDocuments({ user: userId, status: 'completed' });
+    const progressDocs = await ReadingProgress.find({ user: userId }).select('totalReadingTime').lean();
+    const readingTime = progressDocs.reduce((sum, p) => sum + (p.totalReadingTime || 0), 0);
+    try {
+      const user = await User.findById(userId);
+      if (user) {
+        user.statistics = user.statistics || {};
+        user.statistics.totalBooksRead = booksRead;
+        user.statistics.totalReadingTime = readingTime;
+        await user.save();
+      }
+    } catch {}
+    res.json({
+      message: 'Estatísticas obtidas com sucesso',
+      stats: { booksRead, readingTime }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
 // GET /api/users/:id - Obter perfil de usuário específico
 router.get('/:id', authenticateToken, requireOwnershipOrLibrarian, async (req, res) => {
   try {
@@ -246,6 +271,7 @@ router.get('/:id/reading-stats', authenticateToken, requireOwnershipOrLibrarian,
     res.status(500).json({ message: 'Erro interno do servidor' });
   }
 });
+
 
 // GET /api/users/:id/achievements - Obter conquistas do usuário
 router.get('/:id/achievements', authenticateToken, requireOwnershipOrLibrarian, async (req, res) => {

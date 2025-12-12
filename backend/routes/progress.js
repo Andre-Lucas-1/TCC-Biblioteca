@@ -270,6 +270,11 @@ router.put('/:id/chapter/:chapterId/complete', authenticateToken, requireResourc
       
       await req.user.addExperience(100);
       await req.user.save();
+      try {
+        req.user.statistics = req.user.statistics || {};
+        req.user.statistics.totalBooksRead = (req.user.statistics.totalBooksRead || 0) + 1;
+        await req.user.save();
+      } catch {}
       bookCompleted = true;
     }
     
@@ -308,11 +313,16 @@ router.put('/:id/status', authenticateToken, requireResourceAccess('progress'), 
     const oldStatus = progress.status;
     progress.status = req.body.status;
     
-    if (req.body.status === 'completed' && oldStatus !== 'completed') {
-      progress.completedAt = new Date();
-      await req.user.addExperience(100);
+  if (req.body.status === 'completed' && oldStatus !== 'completed') {
+    progress.completedAt = new Date();
+    await req.user.addExperience(100);
+    await req.user.save();
+    try {
+      req.user.statistics = req.user.statistics || {};
+      req.user.statistics.totalBooksRead = (req.user.statistics.totalBooksRead || 0) + 1;
       await req.user.save();
-    } else if (req.body.status === 'abandoned' && oldStatus !== 'abandoned') {
+    } catch {}
+  } else if (req.body.status === 'abandoned' && oldStatus !== 'abandoned') {
       progress.abandonedAt = new Date();
     }
     

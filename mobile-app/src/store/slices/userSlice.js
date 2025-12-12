@@ -118,6 +118,8 @@ const initialState = {
   stats: {
     totalBooksRead: 0,
     totalReadingTime: 0,
+    booksRead: 0,
+    readingTime: 0,
     currentStreak: 0,
     longestStreak: 0,
     favoriteGenres: [],
@@ -195,6 +197,10 @@ const userSlice = createSlice({
       if (!exists) {
         state.badges.push(badge);
       }
+    },
+    incrementBooksRead: (state) => {
+      state.stats.booksRead = (state.stats.booksRead || 0) + 1;
+      state.stats.totalBooksRead = (state.stats.totalBooksRead || 0) + 1;
     },
   },
   extraReducers: (builder) => {
@@ -306,6 +312,7 @@ export const {
   updateStreak,
   addAchievement,
   addBadge,
+  incrementBooksRead,
 } = userSlice.actions;
 
 // Selectors

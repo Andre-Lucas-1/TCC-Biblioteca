@@ -15,6 +15,7 @@ import { logoutUser } from '../../store/slices/authSlice';
 import { Logo } from '../../components';
 import { fetchUserProfile, fetchUserStats } from '../../store/slices/userSlice';
 import { fetchAchievements, selectAchievements } from '../../store/slices/gamificationSlice';
+import { useFocusEffect } from '@react-navigation/native';
 
 
 const ProfileScreen = ({ navigation }) => {
@@ -29,6 +30,12 @@ const ProfileScreen = ({ navigation }) => {
     dispatch(fetchUserStats());
     dispatch(fetchAchievements());
   }, [dispatch]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      dispatch(fetchUserStats());
+    }, [dispatch])
+  );
 
   const handleLogout = () => {
     Alert.alert(
@@ -62,21 +69,12 @@ const ProfileScreen = ({ navigation }) => {
     navigation.navigate('Achievements');
   };
 
-  const handleStatistics = () => {
-    navigation.navigate('Statistics');
-  };
 
   const handleReadingGoals = () => {
     navigation.navigate('ReadingGoals');
   };
 
   const menuItems = [
-    {
-      icon: '📊',
-      title: 'Estatísticas',
-      subtitle: 'Veja seu progresso de leitura',
-      onPress: handleStatistics,
-    },
     {
       icon: '🏆',
       title: 'Conquistas',
@@ -141,12 +139,12 @@ const ProfileScreen = ({ navigation }) => {
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{stats?.booksRead || 0}</Text>
+            <Text style={styles.statNumber}>{(stats?.booksRead ?? stats?.totalBooksRead ?? 0)}</Text>
             <Text style={styles.statLabel}>Livros Lidos</Text>
           </View>
           
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{stats?.readingTime || 0}h</Text>
+            <Text style={styles.statNumber}>{(stats?.readingTime ?? stats?.totalReadingTime ?? 0)}h</Text>
             <Text style={styles.statLabel}>Tempo de Leitura</Text>
           </View>
           

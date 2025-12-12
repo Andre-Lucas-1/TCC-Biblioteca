@@ -170,11 +170,32 @@ router.get('/achievements', authenticateToken, async (req, res) => {
       return unlocked && unlocked > resetAt;
     });
     const userAchievementIds = userUnlocked.map(a => a.id || a.achievementId);
-    const available = Object.values(ACHIEVEMENTS).map(achievement => ({
-      ...achievement,
-      unlocked: userAchievementIds.includes(achievement.id),
-      unlockedAt: userUnlocked.find(a => (a.id || a.achievementId) === achievement.id)?.unlockedAt || null
-    }));
+    // Buscar progresso do usuário para calcular progresso de conquistas acumulativas
+    const progressList = await ReadingProgress.find({ user: req.user._id })
+      .populate('book', 'genre difficulty')
+      .lean();
+    const completedAfterReset = progressList.filter(p => {
+      const d = p.completedAt || p.lastReadAt || p.startedAt;
+      return p.status === 'completed' && (!resetAt || (d && d > resetAt));
+    }).length;
+    const available = Object.values(ACHIEVEMENTS).map(achievement => {
+      let progress = 0;
+      let maxProgress = 1;
+      if (achievement.id === 'bookworm') {
+        progress = completedAfterReset;
+        maxProgress = 10;
+      } else if (achievement.id === 'first_book') {
+        progress = Math.min(completedAfterReset, 1);
+        maxProgress = 1;
+      }
+      return {
+        ...achievement,
+        unlocked: userAchievementIds.includes(achievement.id),
+        unlockedAt: userUnlocked.find(a => (a.id || a.achievementId) === achievement.id)?.unlockedAt || null,
+        progress,
+        maxProgress
+      };
+    });
     res.json({
       message: 'Conquistas listadas com sucesso',
       available,

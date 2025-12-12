@@ -205,15 +205,7 @@ const HomeScreen = ({ navigation }) => {
               <Text style={styles.quickActionSubtitle}>Veja suas conquistas</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity 
-              style={styles.quickActionCard}
-              onPress={() => navigation.navigate('Statistics')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.quickActionIcon}>📊</Text>
-              <Text style={styles.quickActionTitle}>Estatísticas</Text>
-              <Text style={styles.quickActionSubtitle}>Acompanhe seu progresso</Text>
-            </TouchableOpacity>
+            
             
             <TouchableOpacity 
               style={styles.quickActionCard}

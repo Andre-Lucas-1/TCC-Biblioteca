@@ -13,9 +13,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
-import { COLORS, SIZES, FONTS, SHADOWS, BOOK_GENRES } from '../../constants';
+import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { fetchBooks, clearFilters } from '../../store/slices/booksSlice';
-import { apiUtils } from '../../services/api';
+import api, { apiUtils, readingAPI } from '../../services/api';
 import { Logo } from '../../components';
 import externalBooksAPI from '../../services/externalBooksAPI';
 const { gutendexAPI, bookUtils } = externalBooksAPI;
@@ -24,8 +24,6 @@ const LibraryScreen = ({ navigation }) => {
   const dispatch = useDispatch();
   const { books, isLoading, filters } = useSelector((state) => state.books);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGenre, setSelectedGenre] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('all');
   const [searchResults, setSearchResults] = useState([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [searchTimeout, setSearchTimeout] = useState(null);
@@ -33,6 +31,41 @@ const LibraryScreen = ({ navigation }) => {
   const [filteredLibrary, setFilteredLibrary] = useState([]);
   const [explorePage, setExplorePage] = useState(1);
   const [exploreHasNext, setExploreHasNext] = useState(true);
+  const [selectedStatus, setSelectedStatus] = useState('all');
+  const [completedBookIds, setCompletedBookIds] = useState(new Set());
+  const [completedBookTitles, setCompletedBookTitles] = useState(new Set());
+  const [wishlistedTitles, setWishlistedTitles] = useState(new Set());
+
+  const loadCompletedBooks = async () => {
+    try {
+      const resp = await api.get('/progress', { params: { status: 'completed', limit: 200 } });
+      const list = Array.isArray(resp.data.progress) ? resp.data.progress : resp.data;
+      const ids = new Set(
+        (list || [])
+          .filter(p => p.status === 'completed' || (typeof p.progressPercentage === 'number' && p.progressPercentage >= 99))
+          .map(p => {
+            const b = p.book;
+            return (b && typeof b === 'object') ? (b._id || b.id) : b;
+          })
+          .filter(Boolean)
+      );
+      const titles = new Set(
+        (list || [])
+          .filter(p => p.status === 'completed' || (typeof p.progressPercentage === 'number' && p.progressPercentage >= 99))
+          .map(p => {
+            const b = p.book;
+            const t = (b && typeof b === 'object') ? b.title : p.title;
+            return (t || '').toLowerCase().trim();
+          })
+          .filter(Boolean)
+      );
+      setCompletedBookIds(ids);
+      setCompletedBookTitles(titles);
+    } catch (e) {
+      setCompletedBookIds(new Set());
+      setCompletedBookTitles(new Set());
+    }
+  };
 
   useEffect(() => {
     // Carregar livros iniciais
@@ -41,6 +74,7 @@ const LibraryScreen = ({ navigation }) => {
       if (authed) {
         dispatch(fetchBooks({ limit: 20 }));
         setViewMode('library');
+        await loadCompletedBooks();
       }
       await loadInitialBooks();
     };
@@ -54,10 +88,10 @@ const LibraryScreen = ({ navigation }) => {
     const timeout = setTimeout(() => {
       const q = searchQuery.trim();
       if (viewMode === 'explore') {
-        if (q || selectedGenre) performSearch(q, selectedGenre);
+        if (q) performSearch(q);
         else loadInitialBooks();
       } else {
-        filterLibrary(q, selectedGenre, selectedStatus);
+        filterLibrary(q, selectedStatus);
       }
     }, 400);
     setSearchTimeout(timeout);
@@ -67,12 +101,25 @@ const LibraryScreen = ({ navigation }) => {
   useEffect(() => {
     if (viewMode === 'explore') {
       const q = searchQuery.trim();
-      performSearch(q, selectedGenre);
+      performSearch(q);
     } else {
       const q = searchQuery.trim();
-      filterLibrary(q, selectedGenre, selectedStatus);
+      filterLibrary(q, selectedStatus);
     }
-  }, [selectedGenre, selectedStatus, books, viewMode]);
+  }, [books, viewMode, selectedStatus]);
+
+  useEffect(() => {
+    if (viewMode === 'library' && selectedStatus === 'completed') {
+      loadCompletedBooks();
+    }
+  }, [selectedStatus, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'library' && selectedStatus === 'completed') {
+      const q = searchQuery.trim();
+      filterLibrary(q, 'completed');
+    }
+  }, [completedBookIds]);
 
   const loadInitialBooks = async () => {
     try {
@@ -86,11 +133,10 @@ const LibraryScreen = ({ navigation }) => {
     }
   };
 
-  const performSearch = async (query, genreId) => {
+  const performSearch = async (query) => {
     try {
       setLoadingSearch(true);
-      const term = genreId ? `${query} ${BOOK_GENRES.find(g => g.id === genreId)?.name || ''}`.trim() : query;
-      const result = await gutendexAPI.search(term, 1);
+      const result = await gutendexAPI.search(query, 1);
       const formattedBooks = (result.books || []).map(book => bookUtils.formatBookData(book));
       setSearchResults(formattedBooks);
       setExplorePage(result.pagination?.page || 1);
@@ -102,17 +148,34 @@ const LibraryScreen = ({ navigation }) => {
     }
   };
 
-  const filterLibrary = (query, genreId, statusKey) => {
+  const filterLibrary = (query, statusKey) => {
     let list = books || [];
-    if (genreId) {
-      const gName = BOOK_GENRES.find(g => g.id === genreId)?.name?.toLowerCase();
-      list = list.filter(b => (b.genre || '').toLowerCase().includes(gName || ''));
-    }
     if (query) {
       const q = query.toLowerCase();
       list = list.filter(b => (b.title || '').toLowerCase().includes(q) || (b.author || '').toLowerCase().includes(q));
     }
+    if (statusKey && statusKey !== 'all') {
+      if (statusKey === 'completed') {
+        list = list.filter(b => {
+          const id = b._id || b.id;
+          return completedBookIds.has(id);
+        });
+      } else if (statusKey === 'wishlist') {
+        list = list.filter(b => b.isWishlisted === true || (Array.isArray(b.tags) && b.tags.includes('wishlist')));
+      }
+    }
     setFilteredLibrary(list);
+  };
+
+  const normalize = (s) => (s || '').toLowerCase().trim();
+  const getExploreData = () => {
+    if (selectedStatus === 'completed') {
+      return searchResults.filter(b => completedBookTitles.has(normalize(b.title)));
+    }
+    if (selectedStatus === 'wishlist') {
+      return searchResults.filter(b => wishlistedTitles.has(normalize(b.title)));
+    }
+    return searchResults;
   };
 
   const handleBookPress = (book) => {
@@ -125,13 +188,20 @@ const LibraryScreen = ({ navigation }) => {
 
   const handleClearFilters = () => {
     setSearchQuery('');
-    setSelectedGenre('');
     setSelectedStatus('all');
     setSearchResults([]);
     loadInitialBooks();
     dispatch(clearFilters());
     dispatch(fetchBooks({ limit: 20 }));
   };
+
+  useEffect(() => {
+    const wl = new Set((books || [])
+      .filter(b => b.isWishlisted === true || (Array.isArray(b.tags) && b.tags.includes('wishlist')))
+      .map(b => normalize(b.title))
+    );
+    setWishlistedTitles(wl);
+  }, [books]);
 
   const renderBookItem = ({ item }) => (
     <TouchableOpacity
@@ -160,9 +230,7 @@ const LibraryScreen = ({ navigation }) => {
         <Text style={styles.bookAuthor} numberOfLines={1}>
           {item.authors?.join(', ') || item.author || 'Autor desconhecido'}
         </Text>
-        <Text style={styles.bookGenre}>
-          {item.subjects?.[0] || item.genre || 'Gênero não especificado'}
-        </Text>
+        
         
         <View style={styles.bookMeta}>
           <View style={styles.rating}>
@@ -209,9 +277,7 @@ const LibraryScreen = ({ navigation }) => {
         <Text style={styles.bookAuthor} numberOfLines={1}>
           {item.author || 'Autor desconhecido'}
         </Text>
-        <Text style={styles.bookGenre}>
-          {item.genre || 'Gênero não especificado'}
-        </Text>
+        
         <View style={styles.bookMeta}>
           <View style={styles.statusBadge}>
             <Text style={styles.statusText}>Na biblioteca</Text>
@@ -225,32 +291,9 @@ const LibraryScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
-  const renderGenreFilter = ({ item }) => (
-    <TouchableOpacity
-      style={[
-        styles.genreChip,
-        selectedGenre === item.id && styles.genreChipSelected,
-      ]}
-      onPress={() => setSelectedGenre(selectedGenre === item.id ? '' : item.id)}
-    >
-      <Text
-        style={[
-          styles.genreChipText,
-          selectedGenre === item.id && styles.genreChipTextSelected,
-        ]}
-      >
-        {item.name}
-      </Text>
-    </TouchableOpacity>
-  );
+  
 
-  const statusOptions = [
-    { key: 'all', label: 'Todos' },
-    { key: 'available', label: 'Disponível' },
-    { key: 'reading', label: 'Lendo' },
-    { key: 'completed', label: 'Concluído' },
-    { key: 'wishlist', label: 'Lista de Desejos' },
-  ];
+  
 
   return (
     <SafeAreaView style={styles.container}>
@@ -308,18 +351,7 @@ const LibraryScreen = ({ navigation }) => {
         </ScrollView>
       </View>
 
-      {/* Genre Filter */}
-      <View style={styles.genreFilterContainer}>
-        <Text style={styles.filterTitle}>Gêneros</Text>
-        <FlatList
-          data={BOOK_GENRES}
-          renderItem={renderGenreFilter}
-          keyExtractor={(item) => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.genreFilterContent}
-        />
-      </View>
+      
 
       {/* Switch Library/Explore */}
       <View style={styles.viewSwitchContainer}>
@@ -354,7 +386,8 @@ const LibraryScreen = ({ navigation }) => {
               contentContainerStyle={styles.booksListContent}
               ItemSeparatorComponent={() => <View style={styles.bookSeparator} />}
               refreshing={isLoading}
-              onRefresh={() => dispatch(fetchBooks({ limit: 20 }))}
+              onRefresh={async () => { await dispatch(fetchBooks({ limit: 20 })); await loadCompletedBooks(); }}
+              onScrollBeginDrag={async () => { if (viewMode === 'library') await loadCompletedBooks(); }}
               ListEmptyComponent={() => (
                 <View style={styles.loadingContainer}>
                   <Text style={styles.loadingText}>Nenhum livro na biblioteca ainda</Text>
@@ -378,7 +411,7 @@ const LibraryScreen = ({ navigation }) => {
               </View>
             ) : (
               <FlatList
-                data={searchResults}
+                data={getExploreData()}
                 renderItem={renderBookItem}
                 keyExtractor={(item, index) => item.id?.toString() || index.toString()}
                 showsVerticalScrollIndicator={false}
@@ -645,5 +678,25 @@ export default LibraryScreen;
       console.error('Erro ao carregar mais livros:', error);
     } finally {
       setLoadingSearch(false);
+    }
+  };
+  const statusOptions = [
+    { key: 'all', label: 'Todos' },
+    { key: 'completed', label: 'Concluídos' },
+    { key: 'wishlist', label: 'Lista de Desejos' },
+  ];
+  const loadCompletedBooks = async () => {
+    try {
+      const res = await readingAPI.getReadingProgress();
+      const list = Array.isArray(res.data.progress) ? res.data.progress : res.data;
+      const ids = new Set(
+        (list || [])
+          .filter(p => p.status === 'completed' || (typeof p.progressPercentage === 'number' && p.progressPercentage >= 99))
+          .map(p => (typeof p.book === 'object' ? p.book._id || p.book.id : p.book))
+          .filter(Boolean)
+      );
+      setCompletedBookIds(ids);
+    } catch (e) {
+      setCompletedBookIds(new Set());
     }
   };

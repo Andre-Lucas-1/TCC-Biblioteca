@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, SafeAreaVi
 import { COLORS, SIZES, FONTS } from '../../constants';
 import api, { chaptersAPI, readingAPI } from '../../services/api';
 import { useDispatch } from 'react-redux';
-import { checkAchievements } from '../../store/slices/gamificationSlice';
+import { checkAchievements, fetchAchievements } from '../../store/slices/gamificationSlice';
+import { fetchUserStats, incrementBooksRead } from '../../store/slices/userSlice';
 
 const ChaptersListScreen = ({ navigation, route }) => {
   const { bookId, bookTitle } = route.params;
@@ -37,6 +38,10 @@ const ChaptersListScreen = ({ navigation, route }) => {
     try {
       setFinalizing(true);
       let currentProgress = progress;
+      if (currentProgress && currentProgress.status === 'completed') {
+        alert('Você já finalizou este livro.');
+        return;
+      }
       if (!currentProgress) {
         const startRes = await readingAPI.startReading(bookId);
         currentProgress = startRes.data.progress;
@@ -44,15 +49,23 @@ const ChaptersListScreen = ({ navigation, route }) => {
       }
       try {
         await api.put(`/progress/${currentProgress._id}/status`, { status: 'completed' });
+        setProgress({ ...currentProgress, status: 'completed' });
       } catch (_) {
         await api.put(`/progress/${currentProgress._id}/chapter/${lastChapterId}/complete`);
+        setProgress({ ...currentProgress, status: 'completed' });
       }
       try {
-        await dispatch(checkAchievements());
-        // Garantir sincronização com o servidor
+        const action = await dispatch(checkAchievements());
+        const payload = action?.payload || {};
+        const newAchievements = Array.isArray(payload.newAchievements) ? payload.newAchievements : [];
         await dispatch(fetchAchievements());
+        await dispatch(fetchUserStats());
+        alert('Livro finalizado!');
+        if (newAchievements.length > 0) {
+          const names = newAchievements.map(a => a.name).filter(Boolean).join(', ');
+          alert(names ? `Conquista desbloqueada: ${names}` : 'Conquista desbloqueada!');
+        }
       } catch {}
-      alert('Livro finalizado! Conquista aplicada.');
     } catch (e) {
       alert('Falha ao finalizar livro.');
     } finally {
@@ -62,6 +75,7 @@ const ChaptersListScreen = ({ navigation, route }) => {
 
   const renderItem = ({ item, index }) => {
     const isLast = index === chapters.length - 1;
+    const alreadyCompleted = progress && progress.status === 'completed';
     return (
       <View style={styles.item}>
         <TouchableOpacity
@@ -76,7 +90,7 @@ const ChaptersListScreen = ({ navigation, route }) => {
             disabled={finalizing}
             onPress={() => finalizeBook(item._id)}
           >
-            <Text style={styles.finalizeText}>{finalizing ? 'Finalizando...' : 'Finalizar Livro'}</Text>
+            <Text style={styles.finalizeText}>{finalizing ? 'Finalizando...' : (alreadyCompleted ? 'Livro já finalizado' : 'Finalizar Livro')}</Text>
           </TouchableOpacity>
         )}
       </View>

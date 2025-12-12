@@ -18,7 +18,6 @@ import ChaptersListScreen from '../screens/main/ChaptersListScreen';
 import EditProfileScreen from '../screens/main/EditProfileScreen';
 import SettingsScreen from '../screens/main/SettingsScreen';
 import AchievementsScreen from '../screens/main/AchievementsScreen';
-import StatisticsScreen from '../screens/main/StatisticsScreen';
 import ReadingGoalsScreen from '../screens/main/ReadingGoalsScreen';
 
 const Stack = createStackNavigator();
@@ -89,7 +88,6 @@ const AppNavigator = () => {
             <Stack.Screen name="EditProfile" component={EditProfileScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
             <Stack.Screen name="Achievements" component={AchievementsScreen} />
-            <Stack.Screen name="Statistics" component={StatisticsScreen} />
             <Stack.Screen name="ReadingGoals" component={ReadingGoalsScreen} />
           </>
         ) : (
