@@ -102,19 +102,32 @@ router.post('/register', registerValidation, async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
-    // Criar usuário diretamente no Prisma
+    // Criar no serviço externo (best-effort)
     try { await externalAuth.get('/'); } catch {}
-    let externalCreated;
     try {
-      externalCreated = await externalAuth.post('/users', { name, email, password: passwordHash });
+      await externalAuth.post('/users', { name, email, password: passwordHash });
+      externalCache.set(String(email).toLowerCase(), { name, email, passwordHash });
     } catch (e) {
-      return res.status(503).json({ message: 'Serviço externo indisponível, tente novamente', error: 'EXTERNAL_UNAVAILABLE' });
+      // continua mesmo se externo indisponível; garantimos criação local
     }
-    // Atualiza cache
-    externalCache.set(String(email).toLowerCase(), { name, email, passwordHash });
-    const token = generateToken({ userId: email, email, name, userType: userType || 'user', isActive: true });
-    const externalUser = externalCreated?.data || { name, email };
-    res.status(201).json({ message: 'Usuário criado com sucesso', user: externalUser, token });
+
+    // Criar usuário local (ou reativar se não existir no externo)
+    const existing = await User.findOne({ email });
+    if (existing) {
+      // Reativar/atualizar conta local independente do estado externo
+      existing.password = passwordHash;
+      existing.isActive = true;
+      existing.name = name || existing.name;
+      existing.userType = userType || existing.userType;
+      if (userData.profile) existing.profile = { ...existing.profile, ...userData.profile };
+      await existing.save();
+      const token = generateToken({ userId: existing._id.toString(), email, name: existing.name, userType: existing.userType, isActive: true });
+      return res.status(200).json({ message: 'Conta reativada com sucesso', user: { name: existing.name, email }, token });
+    }
+    const localUser = new User({ name, email, userType: userType || 'user', isActive: true, profile: userData.profile || {}, password: passwordHash });
+    await localUser.save();
+    const token = generateToken({ userId: localUser._id.toString(), email, name, userType: localUser.userType, isActive: true });
+    res.status(201).json({ message: 'Usuário criado com sucesso', user: { name, email }, token });
 
   } catch (error) {
     res.status(500).json({ message: 'Erro interno do servidor', error: 'INTERNAL_ERROR' });
@@ -134,17 +147,31 @@ router.post('/login', loginValidation, async (req, res) => {
     }
 
     const { email, password } = req.body;
-    const externalUser = await findExternalUserByEmail(email);
-    if (!externalUser) {
-      return res.status(401).json({ message: 'Credenciais inválidas', error: 'INVALID_CREDENTIALS' });
+    let valid = false;
+    let displayName = '';
+    // Tenta validar pelo serviço externo
+    try {
+      const externalUser = await findExternalUserByEmail(email);
+      if (externalUser) {
+        const hash = externalUser.passwordHash || externalUser.password;
+        valid = hash ? await bcrypt.compare(password, hash) : false;
+        displayName = externalUser.name || '';
+      }
+    } catch {}
+    // Se não validou externamente, tenta validar localmente
+    const localUser = await User.findOne({ email });
+    if (!valid && localUser && localUser.password) {
+      valid = await bcrypt.compare(password, localUser.password);
+      displayName = localUser.name || displayName;
     }
-    const hash = externalUser.passwordHash || externalUser.password;
-    const valid = hash ? await bcrypt.compare(password, hash) : false;
     if (!valid) {
       return res.status(401).json({ message: 'Credenciais inválidas', error: 'INVALID_CREDENTIALS' });
     }
-    const token = generateToken({ userId: email, email, name: externalUser.name || '', userType: 'user', isActive: true });
-    res.json({ message: 'Login realizado com sucesso', user: { name: externalUser.name || '', email }, token });
+    if (!localUser || localUser.isActive === false) {
+      return res.status(403).json({ message: 'Conta inexistente ou desativada', error: 'ACCOUNT_DISABLED' });
+    }
+    const token = generateToken({ userId: localUser._id.toString(), email, name: localUser.name || displayName || '', userType: localUser.userType || 'user', isActive: true });
+    res.json({ message: 'Login realizado com sucesso', user: { name: localUser.name || displayName || '', email }, token });
   } catch (error) {
     res.status(500).json({ message: 'Erro interno do servidor', error: 'INTERNAL_ERROR' });
   }

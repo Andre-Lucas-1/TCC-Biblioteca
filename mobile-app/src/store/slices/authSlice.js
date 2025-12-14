@@ -1,6 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authAPI } from '../../services/api';
+import { authAPI, userAPI } from '../../services/api';
 import { resetGamificationState, fetchGamificationProfile, fetchAchievements, fetchBadges } from './gamificationSlice';
 
 // Async thunks
@@ -14,6 +14,17 @@ export const loginUser = createAsyncThunk(
       await AsyncStorage.setItem('authToken', response.data.token);
       await AsyncStorage.setItem('userData', JSON.stringify(response.data.user));
       
+      try {
+        const profileRes = await userAPI.getProfile();
+        if (!profileRes?.data?.user) {
+          await AsyncStorage.multiRemove(['authToken', 'userData']);
+          return rejectWithValue('Conta inválida');
+        }
+      } catch (e) {
+        await AsyncStorage.multiRemove(['authToken', 'userData']);
+        return rejectWithValue('Conta inválida');
+      }
+
       dispatch(resetGamificationState());
       return response.data;
     } catch (error) {
@@ -34,6 +45,17 @@ export const registerUser = createAsyncThunk(
       await AsyncStorage.setItem('authToken', response.data.token);
       await AsyncStorage.setItem('userData', JSON.stringify(response.data.user));
       
+      try {
+        const profileRes = await userAPI.getProfile();
+        if (!profileRes?.data?.user) {
+          await AsyncStorage.multiRemove(['authToken', 'userData']);
+          return rejectWithValue('Conta inválida');
+        }
+      } catch (e) {
+        await AsyncStorage.multiRemove(['authToken', 'userData']);
+        return rejectWithValue('Conta inválida');
+      }
+
       dispatch(resetGamificationState());
       return response.data;
     } catch (error) {
@@ -46,9 +68,8 @@ export const registerUser = createAsyncThunk(
 
 export const logoutUser = createAsyncThunk(
   'auth/logoutUser',
-  async (_, { dispatch, rejectWithValue }) => {
+  async (_, { dispatch, getState, rejectWithValue }) => {
     try {
-      // Remover dados do AsyncStorage
       await AsyncStorage.multiRemove(['authToken', 'userData']);
       dispatch(resetGamificationState());
       return true;
@@ -66,6 +87,16 @@ export const loadUserFromStorage = createAsyncThunk(
       const userData = await AsyncStorage.getItem('userData');
       
       if (token && userData) {
+        try {
+          const profileRes = await userAPI.getProfile();
+          if (!profileRes?.data?.user) {
+            await AsyncStorage.multiRemove(['authToken', 'userData']);
+            return null;
+          }
+        } catch (e) {
+          await AsyncStorage.multiRemove(['authToken', 'userData']);
+          return null;
+        }
         dispatch(resetGamificationState());
         dispatch(fetchGamificationProfile());
         dispatch(fetchAchievements());

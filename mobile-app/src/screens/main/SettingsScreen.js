@@ -161,24 +161,7 @@ const SettingsScreen = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Settings Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Preferências</Text>
-          {settingsItems.map((item, index) => (
-            <View key={index} style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingTitle}>{item.title}</Text>
-                <Text style={styles.settingSubtitle}>{item.subtitle}</Text>
-              </View>
-              <Switch
-                value={item.value}
-                onValueChange={() => toggleSetting(item.key)}
-                trackColor={{ false: COLORS.gray[300], true: COLORS.primary }}
-                thumbColor={item.value ? COLORS.white : COLORS.gray[400]}
-              />
-            </View>
-          ))}
-        </View>
+        
 
         {/* Actions Section */}
         <View style={styles.section}>

@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { userAPI } from '../../services/api';
+import { loginUser, registerUser, logoutUser, loadUserFromStorage } from './authSlice';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Async thunks
@@ -61,14 +62,20 @@ export const fetchUserStats = createAsyncThunk(
 
 export const fetchGoalsProgress = createAsyncThunk(
   'user/fetchGoalsProgress',
-  async (_, { rejectWithValue }) => {
+  async (_, { getState, rejectWithValue }) => {
     try {
+      const state = getState();
+      const uid = (state?.auth?.user && (state.auth.user._id || state.auth.user.id || state.auth.user.userId || state.auth.user.email)) || 'anonymous';
+      const key = `cache:/users/${uid}/goals-progress`;
       const response = await userAPI.getGoalsProgress();
-      try { await AsyncStorage.setItem('cache:/users/goals-progress', JSON.stringify(response.data)); } catch {}
+      try { await AsyncStorage.setItem(key, JSON.stringify(response.data)); } catch {}
       return response.data;
     } catch (error) {
       try {
-        const raw = await AsyncStorage.getItem('cache:/users/goals-progress');
+        const state = getState();
+        const uid = (state?.auth?.user && (state.auth.user._id || state.auth.user.id || state.auth.user.userId || state.auth.user.email)) || 'anonymous';
+        const key = `cache:/users/${uid}/goals-progress`;
+        const raw = await AsyncStorage.getItem(key);
         if (raw) {
           const cached = JSON.parse(raw);
           return cached;
@@ -81,14 +88,20 @@ export const fetchGoalsProgress = createAsyncThunk(
 
 export const fetchUserGoals = createAsyncThunk(
   'user/fetchUserGoals',
-  async (_, { rejectWithValue }) => {
+  async (_, { getState, rejectWithValue }) => {
     try {
+      const state = getState();
+      const uid = (state?.auth?.user && (state.auth.user._id || state.auth.user.id || state.auth.user.userId || state.auth.user.email)) || 'anonymous';
+      const key = `cache:/users/${uid}/goals`;
       const response = await userAPI.getGoals();
-      try { await AsyncStorage.setItem('cache:/users/goals', JSON.stringify(response.data)); } catch {}
+      try { await AsyncStorage.setItem(key, JSON.stringify(response.data)); } catch {}
       return response.data;
     } catch (error) {
       try {
-        const raw = await AsyncStorage.getItem('cache:/users/goals');
+        const state = getState();
+        const uid = (state?.auth?.user && (state.auth.user._id || state.auth.user.id || state.auth.user.userId || state.auth.user.email)) || 'anonymous';
+        const key = `cache:/users/${uid}/goals`;
+        const raw = await AsyncStorage.getItem(key);
         if (raw) {
           const cached = JSON.parse(raw);
           return cached;
@@ -317,9 +330,99 @@ const userSlice = createSlice({
         return { ...g, current, percentage };
       });
     },
+    incrementGoalProgressLocal: (state, action) => {
+      const { type, period, delta = 1 } = action.payload || {};
+      state.goals = (state.goals || []).map(g => {
+        if (g.type === type && g.period === period) {
+          const target = g.target || 0;
+          let current = (g.current || 0) + delta;
+          const percentage = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+          return { ...g, current, percentage };
+        }
+        return g;
+      });
+    },
   },
   extraReducers: (builder) => {
     builder
+      .addCase(loginUser.fulfilled, (state) => {
+        state.profile = null;
+        state.stats = {
+          totalBooksRead: 0,
+          totalReadingTime: 0,
+          booksRead: 0,
+          readingTime: 0,
+          currentStreak: 0,
+          longestStreak: 0,
+          favoriteGenres: [],
+          readingGoals: { daily: 30, weekly: 3, monthly: 12 },
+          goalsProgress: { dailyMinutes: 0, weeklyBooks: 0, monthlyBooks: 0 },
+        };
+        state.goals = [];
+        state.isLoadingGoals = false;
+        state.goalsError = null;
+        state.achievements = [];
+        state.badges = [];
+      })
+      .addCase(registerUser.fulfilled, (state) => {
+        state.profile = null;
+        state.stats = {
+          totalBooksRead: 0,
+          totalReadingTime: 0,
+          booksRead: 0,
+          readingTime: 0,
+          currentStreak: 0,
+          longestStreak: 0,
+          favoriteGenres: [],
+          readingGoals: { daily: 30, weekly: 3, monthly: 12 },
+          goalsProgress: { dailyMinutes: 0, weeklyBooks: 0, monthlyBooks: 0 },
+        };
+        state.goals = [];
+        state.isLoadingGoals = false;
+        state.goalsError = null;
+        state.achievements = [];
+        state.badges = [];
+      })
+      .addCase(loadUserFromStorage.fulfilled, (state, action) => {
+        if (!action.payload) {
+          state.profile = null;
+          state.stats = {
+            totalBooksRead: 0,
+            totalReadingTime: 0,
+            booksRead: 0,
+            readingTime: 0,
+            currentStreak: 0,
+            longestStreak: 0,
+            favoriteGenres: [],
+            readingGoals: { daily: 30, weekly: 3, monthly: 12 },
+            goalsProgress: { dailyMinutes: 0, weeklyBooks: 0, monthlyBooks: 0 },
+          };
+          state.goals = [];
+          state.isLoadingGoals = false;
+          state.goalsError = null;
+          state.achievements = [];
+          state.badges = [];
+        }
+      })
+      .addCase(logoutUser.fulfilled, (state) => {
+        state.profile = null;
+        state.stats = {
+          totalBooksRead: 0,
+          totalReadingTime: 0,
+          booksRead: 0,
+          readingTime: 0,
+          currentStreak: 0,
+          longestStreak: 0,
+          favoriteGenres: [],
+          readingGoals: { daily: 30, weekly: 3, monthly: 12 },
+          goalsProgress: { dailyMinutes: 0, weeklyBooks: 0, monthlyBooks: 0 },
+        };
+        state.goals = [];
+        state.isLoadingGoals = false;
+        state.goalsError = null;
+        state.achievements = [];
+        state.badges = [];
+      })
       // Fetch user profile
       .addCase(fetchUserProfile.pending, (state) => {
         state.isLoading = true;
@@ -402,9 +505,22 @@ const userSlice = createSlice({
       .addCase(fetchUserGoals.fulfilled, (state, action) => {
         state.isLoadingGoals = false;
         const remote = action.payload.goals || [];
-        const byId = new Map(remote.map(g => [g._id, g]));
-        state.goals.forEach(g => { if (!byId.has(g._id)) byId.set(g._id, g); });
-        state.goals = Array.from(byId.values());
+        const merged = [];
+        const localById = new Map((state.goals || []).map(g => [g._id, g]));
+        for (const r of remote) {
+          const l = localById.get(r._id);
+          if (l) {
+            const target = r.target || l.target || 0;
+            const current = Math.max(r.current || 0, l.current || 0);
+            const percentage = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+            merged.push({ ...r, current, percentage });
+            localById.delete(r._id);
+          } else {
+            merged.push(r);
+          }
+        }
+        for (const l of localById.values()) merged.push(l);
+        state.goals = merged.sort((a,b)=> (new Date(b.createdAt||0)) - (new Date(a.createdAt||0)));
       })
       .addCase(fetchUserGoals.rejected, (state, action) => {
         state.isLoadingGoals = false;
@@ -473,6 +589,7 @@ export const {
   removeGoalLocal,
   updateGoalsProgressLocal,
   updateCustomGoalsProgressLocal,
+  incrementGoalProgressLocal,
 } = userSlice.actions;
 
 // Selectors

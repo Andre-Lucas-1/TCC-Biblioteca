@@ -35,30 +35,39 @@ const HomeScreen = ({ navigation }) => {
   const [homeGoals, setHomeGoals] = useState([]);
   const [homeGoalBaselines, setHomeGoalBaselines] = useState({});
   const [homeGoalLast, setHomeGoalLast] = useState({});
+  const [createdList, setCreatedList] = useState([]);
   
 
   useEffect(() => {
     dispatch(fetchBooks({ limit: 5, featured: true }));
     loadFeaturedBooks();
-    dispatch(fetchGoalsProgress());
-    dispatch(fetchUserGoals());
-    loadCachedGoals();
-  }, [dispatch]);
+    if (user) {
+      dispatch(fetchGoalsProgress());
+      dispatch(fetchUserGoals());
+      loadCachedGoals();
+    } else {
+      setHomeGoals([]);
+    }
+  }, [dispatch, user]);
 
   useFocusEffect(
     React.useCallback(() => {
-      dispatch(fetchUserGoals());
-      loadCachedGoals();
-    }, [dispatch])
+      if (user) {
+        dispatch(fetchUserGoals());
+        loadCachedGoals();
+      }
+    }, [dispatch, user])
   );
 
-  const userId = (user && (user._id || user.id || user.userId)) || 'anonymous';
-  const cacheKey = `userGoals:${userId}`;
-  const baselineKeyFor = (id) => `goalBaseline:${userId}:${id}`;
-  const lastKeyFor = (id) => `goalLastProgress:${userId}:${id}`;
+  const userId = (user && (user._id || user.id || user.userId || user?.email));
+  const cacheKey = userId ? `userGoals:${userId}` : null;
+  const baselineKeyFor = (id) => (userId ? `goalBaseline:${userId}:${id}` : null);
+  const lastKeyFor = (id) => (userId ? `goalLastProgress:${userId}:${id}` : null);
+  const createdListKey = userId ? `goalCreatedList:${userId}` : null;
 
   const loadCachedGoals = async () => {
     try {
+      if (!cacheKey) return;
       const raw = await AsyncStorage.getItem(cacheKey);
       if (raw) {
         const arr = JSON.parse(raw);
@@ -72,7 +81,9 @@ const HomeScreen = ({ navigation }) => {
       const result = {};
       for (const g of entries) {
         const id = g._id || g.id; if (!id) continue;
-        const raw = await AsyncStorage.getItem(baselineKeyFor(id));
+        const key = baselineKeyFor(id);
+        if (!key) continue;
+        const raw = await AsyncStorage.getItem(key);
         if (raw) { try { result[id] = JSON.parse(raw); } catch {} }
       }
       setHomeGoalBaselines(result);
@@ -84,10 +95,21 @@ const HomeScreen = ({ navigation }) => {
       const result = {};
       for (const g of entries) {
         const id = g._id || g.id; if (!id) continue;
-        const raw = await AsyncStorage.getItem(lastKeyFor(id));
+        const key = lastKeyFor(id);
+        if (!key) continue;
+        const raw = await AsyncStorage.getItem(key);
         if (raw) { try { const num = JSON.parse(raw); if (typeof num === 'number') result[id] = num; } catch {} }
       }
       setHomeGoalLast(result);
+    } catch {}
+  };
+  const loadCreatedRecords = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(createdListKey);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) setCreatedList(arr);
+      }
     } catch {}
   };
 
@@ -95,50 +117,72 @@ const HomeScreen = ({ navigation }) => {
     const baseGoals = Array.isArray(goals) ? goals : [];
     return [...homeGoals.filter(lg => !baseGoals.some(bg => bg._id === lg._id)), ...baseGoals];
   }, [homeGoals, goals]);
-  useEffect(() => { loadBaselines(displayGoals); loadLast(displayGoals); }, [displayGoals]);
+  useEffect(() => { loadBaselines(displayGoals); loadLast(displayGoals); loadCreatedRecords(); }, [displayGoals]);
+  useEffect(() => {
+    setHomeGoals([]);
+    setHomeGoalBaselines({});
+    setHomeGoalLast({});
+    setCreatedList([]);
+  }, [userId]);
   useEffect(() => {
     const run = async () => {
-      const key = `alertedGoals:${(user && (user._id || user.id || user.userId)) || 'anonymous'}`;
+      const key = userId ? `alertedGoals:${userId}` : null;
       let alerted = [];
       try {
-        const raw = await AsyncStorage.getItem(key);
-        if (raw) {
-          const arr = JSON.parse(raw);
-          if (Array.isArray(arr)) alerted = arr;
+        if (key) {
+          const raw = await AsyncStorage.getItem(key);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) alerted = arr;
+          }
         }
       } catch {}
       const next = [...alerted];
-      displayGoals.forEach(g => {
+      displayGoals.forEach(async g => {
         const id = g._id || g.id;
         const base = id ? homeGoalBaselines[id] : undefined;
-        let currentVal = g.current || 0;
+        let currentVal = (g.current !== undefined && g.current !== null) ? g.current : 0;
         if (base) {
           if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
           if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
           if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
         }
-        const last = id ? homeGoalLast[id] : undefined;
+        let last = id ? homeGoalLast[id] : undefined;
+        if (last === undefined && base) last = 0;
         const target = g.target || 0;
         const justCompleted = typeof last === 'number' && last < target && currentVal >= target && currentVal > last && g.active !== false;
         if (justCompleted && id && !next.includes(id)) {
           Alert.alert('Meta concluída', g.title || 'Meta');
           next.push(id);
+          try {
+            dispatch(removeGoalLocal(id));
+            await dispatch(deleteUserGoal(id)).unwrap();
+            const bKey = baselineKeyFor(id);
+            if (bKey) { try { await AsyncStorage.removeItem(bKey); } catch {} }
+            try {
+              const updatedCreated = (Array.isArray(createdList) ? createdList : []).filter(x => x.id !== id);
+              setCreatedList(updatedCreated);
+              if (createdListKey) await AsyncStorage.setItem(createdListKey, JSON.stringify(updatedCreated));
+            } catch {}
+          } catch {}
         }
       });
-      try { await AsyncStorage.setItem(key, JSON.stringify(next)); } catch {}
+      if (key) { try { await AsyncStorage.setItem(key, JSON.stringify(next)); } catch {} }
     };
     run();
-  }, [displayGoals, stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks]);
+  }, [displayGoals, stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks, userId]);
 
   useEffect(() => {
     const run = async () => {
-      const key = `alertedBuiltins:${(user && (user._id || user.id || user.userId)) || 'anonymous'}`;
+      const key = userId ? `alertedBuiltins:${userId}` : null;
       let alerted = {};
       try {
-        const raw = await AsyncStorage.getItem(key);
-        if (raw) {
-          const obj = JSON.parse(raw);
-          if (obj && typeof obj === 'object') alerted = obj;
+        if (key) {
+          const raw = await AsyncStorage.getItem(key);
+          if (raw) {
+            const obj = JSON.parse(raw);
+            if (obj && typeof obj === 'object') alerted = obj;
+          }
         }
       } catch {}
       const dailyPct = Math.min(100, Math.round(((stats?.goalsProgress?.dailyMinutes || 0) / (stats?.readingGoals?.daily || 1)) * 100));
@@ -148,10 +192,10 @@ const HomeScreen = ({ navigation }) => {
       if (dailyPct >= 100 && !alerted.daily) { Alert.alert('Meta diária concluída', 'Parabéns!'); alerted.daily = true; changed = true; }
       if (weeklyPct >= 100 && !alerted.weekly) { Alert.alert('Meta semanal concluída', 'Parabéns!'); alerted.weekly = true; changed = true; }
       if (monthlyPct >= 100 && !alerted.monthly) { Alert.alert('Meta mensal concluída', 'Parabéns!'); alerted.monthly = true; changed = true; }
-      if (changed) { try { await AsyncStorage.setItem(key, JSON.stringify(alerted)); } catch {} }
+      if (changed && key) { try { await AsyncStorage.setItem(key, JSON.stringify(alerted)); } catch {} }
     };
     run();
-  }, [stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks, stats?.readingGoals?.daily, stats?.readingGoals?.weekly, stats?.readingGoals?.monthly]);
+  }, [stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks, stats?.readingGoals?.daily, stats?.readingGoals?.weekly, stats?.readingGoals?.monthly, userId]);
 
   const loadFeaturedBooks = async () => {
     try {
@@ -257,31 +301,40 @@ const HomeScreen = ({ navigation }) => {
               <Text style={styles.loadingText}>Carregando...</Text>
             ) : (
               (Array.isArray(displayGoals) && displayGoals.length > 0) ? (
-                displayGoals.slice(0, 3).map((g) => {
-                  const id = g._id || g.id;
-                  const base = id ? homeGoalBaselines[id] : undefined;
-                  let currentVal = g.current || 0;
-                  if (base) {
-                    if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
-                    if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
-                    if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
-                  }
-                  const last = id ? homeGoalLast[id] : undefined;
-                  const pct = g.target > 0 ? Math.min(100, Math.round(((currentVal) / g.target) * 100)) : 0;
-                  try { if (id) AsyncStorage.setItem(lastKeyFor(id), JSON.stringify(currentVal)); } catch {}
-                  return (
+                displayGoals
+                  .map((g) => {
+                    const id = g._id || g.id;
+                    const base = id ? homeGoalBaselines[id] : undefined;
+                    let currentVal = (g.current !== undefined && g.current !== null) ? g.current : 0;
+                    if (base) {
+                      if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
+                      if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
+                      if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
+                    }
+                    const pct = g.target > 0 ? Math.min(100, Math.round(((currentVal) / g.target) * 100)) : 0;
+                    return { g, pct, currentVal };
+                  })
+                  .filter(({ pct }) => pct < 100)
+                  .slice(0, 3)
+                  .map(({ g, pct, currentVal }) => (
                     <View key={g._id} style={[styles.personalGoalCard, ui.card]}>
                       <View style={styles.personalGoalHeader}>
-                        <Text style={styles.personalGoalTitle}>{g.title}</Text>
+                        <Text style={styles.personalGoalTitle} numberOfLines={1} ellipsizeMode="tail">{g.title}</Text>
                         <Text style={styles.personalGoalMeta}>{(g.type === 'minutes' ? 'Minutos' : 'Livros')} · {g.period === 'day' ? 'Dia' : g.period === 'week' ? 'Semana' : g.period === 'month' ? 'Mês' : 'Ano'}</Text>
                       </View>
                       <View style={styles.goalBar}><View style={[styles.goalFill, { width: `${pct}%` }]} /></View>
                       <Text style={styles.goalSub}>{currentVal} / {g.target} {g.type === 'minutes' ? 'min' : 'livros'}</Text>
-                      {pct >= 100 && (<Text style={styles.goalSub}>Concluída</Text>)}
-                      {(g.createdAt && (Date.now() - new Date(g.createdAt).getTime()) < 5 * 60 * 1000) && (<Text style={styles.goalSub}>Meta criada</Text>)}
+                      {(() => {
+                        const id = g._id || g.id;
+                        const base = id ? homeGoalBaselines[id] : undefined;
+                        const createdMs = g.createdAt ? new Date(g.createdAt).getTime() : (base?.createdAt ? base.createdAt : undefined);
+                        const isNewBackend = createdMs ? ((Date.now() - createdMs) < 5 * 60 * 1000) : false;
+                        const isNewLocal = Array.isArray(createdList) && !!createdList.find(x => x.id === id && ((Date.now() - x.ts) < 5 * 60 * 1000));
+                        const show = isNewBackend || isNewLocal;
+                        return show ? (<Text style={styles.goalSub}>Meta criada</Text>) : null;
+                      })()}
                     </View>
-                  );
-                })
+                  ))
               ) : (
                 <Text style={styles.loadingText}>Você ainda não tem metas personalizadas</Text>
               )
@@ -470,8 +523,9 @@ const styles = StyleSheet.create({
   continueReadingCard: {
     backgroundColor: 'rgba(255,255,255,0.85)',
     marginHorizontal: SIZES.lg,
-    borderRadius: SIZES.radius.md,
-    padding: SIZES.md,
+    borderRadius: SIZES.radius.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     flexDirection: 'row',
     alignItems: 'center',
     ...SHADOWS.light,
@@ -496,11 +550,13 @@ const styles = StyleSheet.create({
     fontWeight: FONTS.weights.semiBold,
     color: COLORS.text,
     marginBottom: SIZES.xs,
+    lineHeight: 20,
   },
   bookAuthor: {
     fontSize: SIZES.fontSize.sm,
     color: COLORS.textSecondary,
-    marginBottom: SIZES.sm,
+    marginBottom: SIZES.xs,
+    lineHeight: 18,
   },
   progressContainer: {
     flexDirection: 'row',
@@ -525,9 +581,9 @@ const styles = StyleSheet.create({
   },
   continueButton: {
     backgroundColor: COLORS.primary,
-    paddingHorizontal: SIZES.md,
-    paddingVertical: SIZES.sm,
-    borderRadius: SIZES.radius.sm,
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.md,
+    borderRadius: SIZES.radius.md,
   },
   continueButtonText: {
     fontSize: SIZES.fontSize.sm,
@@ -538,12 +594,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: SIZES.lg,
   },
   bookCard: {
-    width: 120,
+    width: 128,
     marginRight: SIZES.md,
   },
   bookCardCover: {
-    width: 120,
-    height: 160,
+    width: 128,
+    height: 176,
     backgroundColor: 'rgba(255,255,255,0.75)',
     borderRadius: SIZES.radius.sm,
     justifyContent: 'center',
@@ -605,10 +661,16 @@ const styles = StyleSheet.create({
   quickActionsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'stretch',
     paddingHorizontal: SIZES.lg,
   },
   personalGoalCard: {
     marginBottom: SIZES.md,
+    paddingVertical: SIZES.sm,
+    paddingHorizontal: SIZES.sm,
+    borderRadius: SIZES.radius.md,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    ...SHADOWS.light,
   },
   personalGoalHeader: {
     flexDirection: 'row',
@@ -620,6 +682,7 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontSize.md,
     fontWeight: FONTS.weights.semiBold,
     color: COLORS.text,
+    flexShrink: 1,
   },
   personalGoalMeta: {
     fontSize: SIZES.fontSize.xs,
@@ -632,6 +695,7 @@ const styles = StyleSheet.create({
   goalCard: {
     width: '31%',
     alignItems: 'center',
+    paddingVertical: SIZES.sm,
   },
   goalIcon: {
     fontSize: 28,
@@ -649,7 +713,7 @@ const styles = StyleSheet.create({
   },
   goalBar: {
     width: '100%',
-    height: 8,
+    height: 10,
     backgroundColor: COLORS.gray[200],
     borderRadius: 4,
     marginTop: SIZES.xs,
@@ -663,9 +727,11 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontSize.xs,
     color: COLORS.textSecondary,
     marginTop: SIZES.xs,
+    lineHeight: 16,
+    textAlign: 'center',
   },
   quickActionCard: {
-    width: '31%',
+    width: '48%',
     backgroundColor: 'rgba(255,255,255,0.85)',
     borderRadius: SIZES.radius.md,
     paddingVertical: SIZES.md,

@@ -6,7 +6,7 @@ import ui from '../../theme/ui';
 import { useDispatch, useSelector } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { checkAchievements, fetchAchievements } from '../../store/slices/gamificationSlice';
-import { fetchUserStats, incrementBooksRead, fetchGoalsProgress, updateGoalsProgressLocal } from '../../store/slices/userSlice';
+import { fetchUserStats, incrementBooksRead, fetchGoalsProgress, updateGoalsProgressLocal, incrementGoalProgressLocal } from '../../store/slices/userSlice';
 
 const ChaptersListScreen = ({ navigation, route }) => {
   const { bookId, bookTitle } = route.params;
@@ -70,7 +70,8 @@ const ChaptersListScreen = ({ navigation, route }) => {
           const afterWeekly = beforeWeekly + 1;
           const afterMonthly = beforeMonthly + 1;
           dispatch(updateGoalsProgressLocal({ deltaWeeklyBooks: 1, deltaMonthlyBooks: 1 }));
-          dispatch(updateCustomGoalsProgressLocal({ weeklyBooks: afterWeekly, monthlyBooks: afterMonthly }));
+          dispatch(incrementGoalProgressLocal({ type: 'books', period: 'week', delta: 1 }));
+          dispatch(incrementGoalProgressLocal({ type: 'books', period: 'month', delta: 1 }));
         } catch {}
         alert('Livro finalizado!');
         try {
@@ -119,7 +120,8 @@ const ChaptersListScreen = ({ navigation, route }) => {
                 monthlyBooks: afterMonthly,
               }
             };
-            await AsyncStorage.setItem('cache:/users/goals-progress', JSON.stringify(updated));
+            const uid = (user && (user._id || user.id || user.userId)) || 'anonymous';
+            await AsyncStorage.setItem(`cache:/users/${uid}/goals-progress`, JSON.stringify(updated));
           } catch {}
         } catch {}
         if (newAchievements.length > 0) {

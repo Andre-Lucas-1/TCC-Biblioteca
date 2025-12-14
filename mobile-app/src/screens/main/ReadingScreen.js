@@ -9,11 +9,17 @@ import {
   StatusBar,
   Dimensions,
   Modal,
+  Alert,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { fetchBookProgress, startReading } from '../../store/slices/readingSlice';
 import { chaptersAPI } from '../../services/api';
+import api, { readingAPI } from '../../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { checkAchievements, fetchAchievements } from '../../store/slices/gamificationSlice';
+import { fetchUserStats, updateGoalsProgressLocal, incrementGoalProgressLocal, fetchUserGoals } from '../../store/slices/userSlice';
+import { CommonActions } from '@react-navigation/native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -21,6 +27,7 @@ const ReadingScreen = ({ navigation, route }) => {
   const dispatch = useDispatch();
   const { bookId, chapterId } = route.params || {};
   const readingState = useSelector((state) => state.reading);
+  const { stats, goals } = useSelector((state) => state.user);
   const progressByBook = readingState.bookProgress?.[bookId];
   const { isLoading, newAchievements } = readingState;
 
@@ -33,6 +40,8 @@ const ReadingScreen = ({ navigation, route }) => {
   const [totalPages, setTotalPages] = useState(1);
   const [readingTime, setReadingTime] = useState(0);
   const [showAchievementModal, setShowAchievementModal] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const [isLastChapter, setIsLastChapter] = useState(false);
 
   useEffect(() => {
     if (bookId) {
@@ -59,6 +68,130 @@ const ReadingScreen = ({ navigation, route }) => {
     if (!targetId) return;
     try { await chaptersAPI.markRead(chapterId); } catch {}
     navigation.replace('ReadingScreen', { bookId, chapterId: targetId });
+  };
+
+  const resolveNextChapterId = async () => {
+    if (chapter?.navigation?.next && (chapter.navigation.next._id || chapter.navigation.next.id)) {
+      return chapter.navigation.next._id || chapter.navigation.next.id;
+    }
+    try {
+      const res = await chaptersAPI.getChapters(bookId);
+      const list = res.data?.chapters || [];
+      const currentOrder = chapter?.order ?? chapter?.chapterNumber;
+      // try by order, fallback to chapterNumber
+      let idx = -1;
+      if (currentOrder != null) {
+        idx = list.findIndex(c => (c.order ?? c.chapterNumber) === currentOrder);
+      } else {
+        idx = list.findIndex(c => c._id === chapterId);
+      }
+      const next = idx >= 0 ? list[idx + 1] : null;
+      return next?._id || next?.id;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const checkLastChapter = async () => {
+      try {
+        const res = await chaptersAPI.getChapters(bookId);
+        const list = res.data?.chapters || [];
+        const currentId = chapter?._id || chapterId;
+        let idx = list.findIndex(c => c._id === currentId);
+        if (idx < 0) {
+          const currentOrder = chapter?.order ?? chapter?.chapterNumber;
+          if (currentOrder != null) idx = list.findIndex(c => (c.order ?? c.chapterNumber) === currentOrder);
+        }
+        setIsLastChapter(idx >= 0 && idx === list.length - 1);
+      } catch {
+        setIsLastChapter(false);
+      }
+    };
+    checkLastChapter();
+  }, [bookId, chapterId, chapter]);
+
+  const finalizeBook = async () => {
+    try {
+      setFinalizing(true);
+      let pRes;
+      try { pRes = await readingAPI.getBookProgress(bookId); } catch {}
+      let currentProgress = pRes?.data?.progress || null;
+      if (currentProgress && currentProgress.status === 'completed') {
+        Alert.alert('Livro já finalizado');
+        setFinalizing(false);
+        navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'MainTabs', state: { index: 0, routes: [{ name: 'Home' }] } }] }));
+        return;
+      }
+      if (!currentProgress) {
+        try { const startRes = await readingAPI.startReading(bookId); currentProgress = startRes?.data?.progress; } catch {}
+      }
+      if (!currentProgress) { setFinalizing(false); return; }
+      try {
+        await api.put(`/progress/${currentProgress._id}/status`, { status: 'completed' });
+      } catch (_) {
+        try { await api.put(`/progress/${currentProgress._id}/chapter/${chapterId}/complete`); } catch {}
+      }
+      try {
+        const action = await dispatch(checkAchievements());
+        const payload = action?.payload || {};
+        const unlocked = Array.isArray(payload.newAchievements) ? payload.newAchievements : [];
+        if (unlocked.length > 0) {
+          const names = unlocked.map(a => a?.name).filter(Boolean).join(', ');
+          Alert.alert('Conquista concluída', names || 'Nova conquista');
+          setShowAchievementModal(true);
+        }
+        await dispatch(fetchAchievements());
+        await dispatch(fetchUserStats());
+        const beforeWeekly = (stats?.goalsProgress?.weeklyBooks || 0);
+        const beforeMonthly = (stats?.goalsProgress?.monthlyBooks || 0);
+        const afterWeekly = beforeWeekly + 1;
+        const afterMonthly = beforeMonthly + 1;
+        dispatch(updateGoalsProgressLocal({ deltaWeeklyBooks: 1, deltaMonthlyBooks: 1 }));
+        dispatch(incrementGoalProgressLocal({ type: 'books', period: 'week', delta: 1 }));
+        dispatch(incrementGoalProgressLocal({ type: 'books', period: 'month', delta: 1 }));
+        Alert.alert('Livro finalizado!');
+        const weeklyTarget = (stats?.readingGoals?.weekly || 0);
+        const monthlyTarget = (stats?.readingGoals?.monthly || 0);
+        if (weeklyTarget > 0 && beforeWeekly < weeklyTarget && afterWeekly >= weeklyTarget) {
+          Alert.alert('Meta semanal concluída', 'Parabéns!');
+        }
+        if (monthlyTarget > 0 && beforeMonthly < monthlyTarget && afterMonthly >= monthlyTarget) {
+          Alert.alert('Meta mensal concluída', 'Parabéns!');
+        }
+        const custom = Array.isArray(goals) ? goals : [];
+        for (const g of custom) {
+          const id = g._id || g.id; if (!id) continue;
+          if (g.type === 'books' && g.period === 'week') {
+            const tgt = g.target || 0;
+            if (tgt > 0 && beforeWeekly < tgt && afterWeekly >= tgt) Alert.alert('Meta concluída', g.title || 'Meta');
+          }
+          if (g.type === 'books' && g.period === 'month') {
+            const tgt = g.target || 0;
+            if (tgt > 0 && beforeMonthly < tgt && afterMonthly >= tgt) Alert.alert('Meta concluída', g.title || 'Meta');
+          }
+        }
+        try { await dispatch(fetchUserGoals()); } catch {}
+      try {
+        const updated = {
+          message: 'Progresso de metas obtido com sucesso',
+          progress: {
+            dailyMinutes: stats?.goalsProgress?.dailyMinutes || 0,
+            weeklyBooks: afterWeekly,
+            monthlyBooks: afterMonthly,
+          }
+        };
+        const authUser = (await AsyncStorage.getItem('userData'));
+        let uid = 'anonymous';
+        try { if (authUser) { const u = JSON.parse(authUser); uid = u?._id || u?.id || u?.userId || uid; } } catch {}
+        await AsyncStorage.setItem(`cache:/users/${uid}/goals-progress`, JSON.stringify(updated));
+      } catch {}
+      } catch {}
+    } catch {}
+    finally {
+      setFinalizing(false);
+      navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'MainTabs', state: { index: 0, routes: [{ name: 'Home' }] } }] }));
+    }
   };
 
   const goToPage = async (nextPage) => {
@@ -133,8 +266,7 @@ const ReadingScreen = ({ navigation, route }) => {
         </Text>
       </ScrollView>
 
-      {/* Navigation */}
-      <View style={[styles.navigation, { backgroundColor }]}>
+      <View style={[styles.navigation, { backgroundColor }]}> 
         <TouchableOpacity 
           style={[styles.navButton, currentPage === 1 && styles.navButtonDisabled]}
           onPress={() => goToPage(currentPage - 1)}
@@ -152,22 +284,28 @@ const ReadingScreen = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.navigation, { backgroundColor }]}>
-        <TouchableOpacity 
-          style={[styles.navButton, !chapter?.navigation?.previous && styles.navButtonDisabled]}
-          onPress={() => goToChapter(chapter?.navigation?.previous?._id)}
-          disabled={!chapter?.navigation?.previous}
-        >
-          <Text style={[styles.navButtonText, { color: textColor }]}>‹ Capítulo</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.navButton}
-          onPress={() => goToChapter(chapter?.navigation?.next?._id)}
-          disabled={!chapter?.navigation?.next}
-        >
-          <Text style={[styles.navButtonText, { color: textColor }]}>Capítulo ›</Text>
-        </TouchableOpacity>
-      </View>
+      {(((chapter?.pagination?.page ?? currentPage) >= (chapter?.pagination?.totalPages ?? totalPages))) ? (
+        <View style={[styles.navigation, { backgroundColor }]}>
+          <TouchableOpacity 
+            style={styles.navButton}
+            onPress={async () => { const nextId = await resolveNextChapterId(); if (nextId) goToChapter(nextId); }}
+          >
+            <Text style={[styles.navButtonText, { color: textColor }]}>Próximo capítulo ›</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {(((chapter?.pagination?.page ?? currentPage) >= (chapter?.pagination?.totalPages ?? totalPages)) && isLastChapter) ? (
+        <View style={[styles.navigation, { backgroundColor }]}>
+          <TouchableOpacity 
+            style={[styles.finishButton, finalizing && { opacity: 0.6 }]}
+            onPress={finalizing ? undefined : finalizeBook}
+            disabled={finalizing}
+          >
+            <Text style={styles.finishButtonText}>{finalizing ? 'Finalizando...' : 'Finalizar Livro'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Settings Modal */}
       <Modal
@@ -285,6 +423,7 @@ const styles = StyleSheet.create({
   chapterTitle: {
     fontSize: SIZES.fontSize.md,
     fontWeight: FONTS.weights.semiBold,
+    textAlign: 'center',
   },
   readingTime: {
     fontSize: SIZES.fontSize.sm,
@@ -315,6 +454,7 @@ const styles = StyleSheet.create({
   contentContainer: {
     flex: 1,
     paddingHorizontal: SIZES.lg,
+    paddingVertical: SIZES.md,
   },
   content: {
     lineHeight: 28,
@@ -329,8 +469,22 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.gray[200],
   },
+  finishButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: SIZES.radius.md,
+    paddingHorizontal: SIZES.xl,
+    paddingVertical: SIZES.md,
+  },
+  finishButtonText: {
+    color: COLORS.white,
+    fontSize: SIZES.fontSize.md,
+    fontWeight: FONTS.weights.semiBold,
+  },
   navButton: {
-    padding: SIZES.md,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
+    borderRadius: SIZES.radius.md,
+    backgroundColor: 'rgba(0,0,0,0.03)',
   },
   navButtonDisabled: {
     opacity: 0.5,

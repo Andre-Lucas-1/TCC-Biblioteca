@@ -1,13 +1,15 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList } from 'react-native';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../constants';
 
 // Import screens
 import HomeScreen from '../screens/main/HomeScreen';
 import LibraryScreen from '../screens/main/LibraryScreen';
-import ReadingScreen from '../screens/main/ReadingScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchReadingProgress } from '../store/slices/readingSlice';
+import { useFocusEffect } from '@react-navigation/native';
 
 const Tab = createBottomTabNavigator();
 
@@ -36,15 +38,74 @@ const TabBarIcon = ({ focused, icon, label }) => {
   );
 };
 
-// Placeholder screen for Reading tab (will navigate to actual reading)
+// Reading tab: shows books em leitura
 const ReadingTabScreen = ({ navigation }) => {
+  const dispatch = useDispatch();
+  const readingState = useSelector((state) => state.reading);
+  const { overallProgress, isLoading } = readingState;
+  const booksInProgress = Array.isArray(overallProgress?.booksInProgress) ? overallProgress.booksInProgress : [];
+
+  useFocusEffect(
+    React.useCallback(() => {
+      dispatch(fetchReadingProgress());
+    }, [dispatch])
+  );
+
+  const renderItem = ({ item }) => {
+    const bookId = item?.book?._id || item?.bookId || item?.id;
+    const title = item?.book?.title || item?.title || 'Livro';
+    const author = (item?.book?.author || item?.author || '') + '';
+    const cover = item?.book?.coverImage || item?.coverImage || '';
+    return (
+      <View style={styles.readingCard}>
+        <View style={styles.readingCover}>
+          {cover ? (
+            <Image source={{ uri: cover }} style={styles.readingCoverImage} resizeMode="cover" />
+          ) : (
+            <View style={styles.readingCoverPlaceholder}><Text style={styles.readingCoverIcon}>📚</Text></View>
+          )}
+        </View>
+        <View style={styles.readingInfo}>
+          <Text style={styles.readingTitle} numberOfLines={1} ellipsizeMode="tail">{title}</Text>
+          {!!author && <Text style={styles.readingAuthor} numberOfLines={1} ellipsizeMode="tail">{author}</Text>}
+          <View style={styles.readingActions}>
+            <TouchableOpacity style={styles.readingButton} onPress={() => navigation.navigate('ChaptersList', { bookId, bookTitle: title })}>
+              <Text style={styles.readingButtonText}>Ver capítulos</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  if (isLoading && booksInProgress.length === 0) {
+    return (
+      <View style={styles.placeholderContainer}>
+        <Text style={styles.placeholderIcon}>📖</Text>
+        <Text style={styles.placeholderTitle}>Leitura</Text>
+        <Text style={styles.placeholderText}>Carregando seus livros...</Text>
+      </View>
+    );
+  }
+
+  if (booksInProgress.length === 0) {
+    return (
+      <View style={styles.placeholderContainer}>
+        <Text style={styles.placeholderIcon}>📖</Text>
+        <Text style={styles.placeholderTitle}>Leitura</Text>
+        <Text style={styles.placeholderText}>Nenhum livro em leitura. Adicione um pela Biblioteca.</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.placeholderContainer}>
-      <Text style={styles.placeholderIcon}>📖</Text>
-      <Text style={styles.placeholderTitle}>Modo de Leitura</Text>
-      <Text style={styles.placeholderText}>
-        Selecione um livro para começar a ler
-      </Text>
+    <View style={styles.readingListContainer}>
+      <FlatList
+        data={booksInProgress}
+        keyExtractor={(item, idx) => (item?.book?._id || item?.bookId || item?.id || idx.toString())}
+        renderItem={renderItem}
+        contentContainerStyle={styles.readingListContent}
+      />
     </View>
   );
 };
@@ -135,18 +196,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconWrapper: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SIZES.xs,
+    ...SHADOWS.light,
   },
   iconWrapperFocused: {
     backgroundColor: COLORS.primary,
   },
   iconText: {
-    fontSize: 20,
+    fontSize: 22,
   },
   labelText: {
     fontSize: SIZES.fontSize.xs,
@@ -176,6 +238,37 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
   },
+  readingListContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    paddingVertical: SIZES.md,
+  },
+  readingListContent: {
+    paddingHorizontal: SIZES.lg,
+    paddingBottom: SIZES.xl,
+  },
+  readingCard: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: SIZES.radius.md,
+    padding: SIZES.md,
+    marginBottom: SIZES.md,
+    ...SHADOWS.light,
+  },
+  readingCover: {
+    width: 60,
+    height: 80,
+    marginRight: SIZES.md,
+  },
+  readingCoverImage: { width: '100%', height: '100%', borderRadius: SIZES.radius.sm },
+  readingCoverPlaceholder: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.surface, borderRadius: SIZES.radius.sm },
+  readingCoverIcon: { fontSize: 24 },
+  readingInfo: { flex: 1 },
+  readingTitle: { fontSize: SIZES.fontSize.md, fontWeight: FONTS.weights.semiBold, color: COLORS.text },
+  readingAuthor: { fontSize: SIZES.fontSize.sm, color: COLORS.textSecondary, marginTop: SIZES.xs },
+  readingActions: { flexDirection: 'row', marginTop: SIZES.sm },
+  readingButton: { backgroundColor: COLORS.primary, borderRadius: SIZES.radius.sm, paddingVertical: SIZES.xs, paddingHorizontal: SIZES.md },
+  readingButtonText: { color: COLORS.white, fontWeight: FONTS.weights.medium, fontSize: SIZES.fontSize.sm },
 });
 
 export default MainTabNavigator;

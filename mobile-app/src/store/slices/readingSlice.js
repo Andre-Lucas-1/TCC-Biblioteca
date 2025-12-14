@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { loginUser, registerUser, logoutUser } from './authSlice';
 import { readingAPI } from '../../services/api';
 
 // Async thunks
@@ -232,6 +233,16 @@ const readingSlice = createSlice({
       state.newAchievements = [];
       state.experienceGained = 0;
     },
+    addBookInProgressLocal: (state, action) => {
+      const { bookId, title, author, coverImage } = action.payload || {};
+      const entryId = bookId;
+      const exists = (state.overallProgress.booksInProgress || []).some(x => (x?.book?._id || x?.bookId || x?.id) === entryId);
+      const newEntry = { book: { _id: entryId, title: title || 'Livro', author: author || '', coverImage: coverImage || '' } };
+      if (!exists) {
+        state.overallProgress.booksInProgress = [newEntry, ...(state.overallProgress.booksInProgress || [])];
+      }
+      state.bookProgress[entryId] = state.bookProgress[entryId] || { book: { _id: entryId, title, author, coverImage }, progressPercentage: 0, status: 'reading' };
+    },
     updateLocalReadingTime: (state, action) => {
       const { bookId, timeSpent } = action.payload;
       if (state.bookProgress[bookId]) {
@@ -256,6 +267,108 @@ const readingSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(loginUser.fulfilled, (state) => {
+        state.overallProgress = {
+          booksInProgress: [],
+          booksCompleted: [],
+          totalReadingTime: 0,
+          currentStreak: 0,
+          weeklyGoalProgress: 0,
+        };
+        state.bookProgress = {};
+        state.activeSessions = {};
+        state.favorites = [];
+        state.readingNotes = {};
+        state.isLoading = false;
+        state.isLoadingBookProgress = false;
+        state.isStartingReading = false;
+        state.isStartingSession = false;
+        state.isEndingSession = false;
+        state.isMarkingComplete = false;
+        state.isUpdatingStatus = false;
+        state.isAddingToFavorites = false;
+        state.isRemovingFromFavorites = false;
+        state.isAddingNote = false;
+        state.isLoadingNotes = false;
+        state.error = null;
+        state.bookProgressError = null;
+        state.sessionError = null;
+        state.markCompleteError = null;
+        state.statusError = null;
+        state.favoritesError = null;
+        state.notesError = null;
+        state.successMessage = null;
+        state.newAchievements = [];
+        state.experienceGained = 0;
+      })
+      .addCase(registerUser.fulfilled, (state) => {
+        state.overallProgress = {
+          booksInProgress: [],
+          booksCompleted: [],
+          totalReadingTime: 0,
+          currentStreak: 0,
+          weeklyGoalProgress: 0,
+        };
+        state.bookProgress = {};
+        state.activeSessions = {};
+        state.favorites = [];
+        state.readingNotes = {};
+        state.isLoading = false;
+        state.isLoadingBookProgress = false;
+        state.isStartingReading = false;
+        state.isStartingSession = false;
+        state.isEndingSession = false;
+        state.isMarkingComplete = false;
+        state.isUpdatingStatus = false;
+        state.isAddingToFavorites = false;
+        state.isRemovingFromFavorites = false;
+        state.isAddingNote = false;
+        state.isLoadingNotes = false;
+        state.error = null;
+        state.bookProgressError = null;
+        state.sessionError = null;
+        state.markCompleteError = null;
+        state.statusError = null;
+        state.favoritesError = null;
+        state.notesError = null;
+        state.successMessage = null;
+        state.newAchievements = [];
+        state.experienceGained = 0;
+      })
+      .addCase(logoutUser.fulfilled, (state) => {
+        state.overallProgress = {
+          booksInProgress: [],
+          booksCompleted: [],
+          totalReadingTime: 0,
+          currentStreak: 0,
+          weeklyGoalProgress: 0,
+        };
+        state.bookProgress = {};
+        state.activeSessions = {};
+        state.favorites = [];
+        state.readingNotes = {};
+        state.isLoading = false;
+        state.isLoadingBookProgress = false;
+        state.isStartingReading = false;
+        state.isStartingSession = false;
+        state.isEndingSession = false;
+        state.isMarkingComplete = false;
+        state.isUpdatingStatus = false;
+        state.isAddingToFavorites = false;
+        state.isRemovingFromFavorites = false;
+        state.isAddingNote = false;
+        state.isLoadingNotes = false;
+        state.error = null;
+        state.bookProgressError = null;
+        state.sessionError = null;
+        state.markCompleteError = null;
+        state.statusError = null;
+        state.favoritesError = null;
+        state.notesError = null;
+        state.successMessage = null;
+        state.newAchievements = [];
+        state.experienceGained = 0;
+      })
       // Fetch reading progress
       .addCase(fetchReadingProgress.pending, (state) => {
         state.isLoading = true;
@@ -297,6 +410,15 @@ const readingSlice = createSlice({
         state.bookProgress[action.payload.bookId] = action.payload.progress;
         state.successMessage = 'Leitura iniciada com sucesso!';
         state.error = null;
+        const bookId = action.payload.bookId;
+        const progress = action.payload.progress || {};
+        const b = progress.book || {};
+        const entryId = b._id || b.id || bookId;
+        const exists = (state.overallProgress.booksInProgress || []).some(x => (x?.book?._id || x?.bookId || x?.id) === entryId);
+        const newEntry = { book: { _id: entryId, title: b.title || progress.title || 'Livro', author: b.author || progress.author, coverImage: b.coverImage || progress.coverImage } };
+        if (!exists) {
+          state.overallProgress.booksInProgress = [newEntry, ...(state.overallProgress.booksInProgress || [])];
+        }
       })
       .addCase(startReading.rejected, (state, action) => {
         state.isStartingReading = false;

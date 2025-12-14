@@ -25,22 +25,17 @@ const authenticateToken = async (req, res, next) => {
     
     // Verificar e decodificar o token
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    // Encontrar ou criar usuário local mínimo para funcionalidades (progresso/gamificação)
     const email = decoded.email;
     let user = null;
     if (email) {
       user = await User.findOne({ email });
-      if (!user) {
-        user = new User({
-          name: decoded.name || email.split('@')[0],
-          email,
-          userType: decoded.userType || 'user',
-          isActive: true
-        });
-        await user.save();
+      if (!user || user.isActive === false) {
+        return res.status(401).json({ message: 'Usuário inválido ou inativo', code: 'USER_NOT_ACTIVE' });
       }
+    } else {
+      return res.status(401).json({ message: 'Token sem email', code: 'INVALID_TOKEN_PAYLOAD' });
     }
-    req.user = user || decoded;
+    req.user = user;
     if (user) {
       let changed = false;
       const removedIds = new Set(['consistent_reader','note_taker','challenge_seeker','genre_explorer']);

@@ -200,7 +200,7 @@ const ProfileScreen = ({ navigation }) => {
 
         {/* Logout Button */}
         <TouchableOpacity
-          style={[styles.logoutButton, ui.card]}
+          style={styles.logoutButton}
           onPress={handleLogout}
           activeOpacity={0.7}
         >
@@ -244,7 +244,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.85)',
     marginHorizontal: SIZES.lg,
     borderRadius: SIZES.radius.lg,
-    padding: SIZES.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     alignItems: 'center',
     marginBottom: SIZES.xl,
     ...SHADOWS.medium,
@@ -294,6 +295,7 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'center',
     paddingHorizontal: SIZES.lg,
     marginBottom: SIZES.xl,
   },
@@ -407,8 +409,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: COLORS.error,
     marginHorizontal: SIZES.lg,
-    borderRadius: SIZES.radius.md,
-    padding: SIZES.md,
+    borderRadius: SIZES.radius.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     ...SHADOWS.light,
   },
   logoutIcon: {

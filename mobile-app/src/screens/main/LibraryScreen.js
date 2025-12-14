@@ -12,6 +12,7 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDispatch, useSelector } from 'react-redux';
 import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants';
 import { fetchBooks, clearFilters } from '../../store/slices/booksSlice';
@@ -24,9 +25,11 @@ const { gutendexAPI, bookUtils } = externalBooksAPI;
 const LibraryScreen = ({ navigation }) => {
   const dispatch = useDispatch();
   const { books, isLoading, filters } = useSelector((state) => state.books);
+  const { user, isAuthenticated } = useSelector((state) => state.auth);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
+  const lastSearchedRef = React.useRef('');
   const [searchTimeout, setSearchTimeout] = useState(null);
   const [viewMode, setViewMode] = useState('explore');
   const [filteredLibrary, setFilteredLibrary] = useState([]);
@@ -36,6 +39,8 @@ const LibraryScreen = ({ navigation }) => {
   const [completedBookIds, setCompletedBookIds] = useState(new Set());
   const [completedBookTitles, setCompletedBookTitles] = useState(new Set());
   const [wishlistedTitles, setWishlistedTitles] = useState(new Set());
+  const uid = (user && (user._id || user.id || user.userId || user.email)) || 'anonymous';
+  const wishlistKey = `wishlist:${uid}`;
 
   const loadCompletedBooks = async () => {
     try {
@@ -74,7 +79,6 @@ const LibraryScreen = ({ navigation }) => {
       const authed = await apiUtils.isAuthenticated();
       if (authed) {
         dispatch(fetchBooks({ limit: 20 }));
-        setViewMode('library');
         await loadCompletedBooks();
       }
       await loadInitialBooks();
@@ -136,8 +140,12 @@ const LibraryScreen = ({ navigation }) => {
 
   const performSearch = async (query) => {
     try {
+      const q = (query || '').trim();
+      if (loadingSearch) return;
+      if (q === lastSearchedRef.current && explorePage === 1 && searchResults.length > 0) return;
       setLoadingSearch(true);
-      const result = await gutendexAPI.search(query, 1);
+      lastSearchedRef.current = q;
+      const result = await gutendexAPI.search(q, 1);
       const formattedBooks = (result.books || []).map(book => bookUtils.formatBookData(book));
       setSearchResults(formattedBooks);
       setExplorePage(result.pagination?.page || 1);
@@ -197,12 +205,34 @@ const LibraryScreen = ({ navigation }) => {
   };
 
   useEffect(() => {
-    const wl = new Set((books || [])
-      .filter(b => b.isWishlisted === true || (Array.isArray(b.tags) && b.tags.includes('wishlist')))
-      .map(b => normalize(b.title))
-    );
-    setWishlistedTitles(wl);
-  }, [books]);
+    const wl = new Set();
+    const loadLocal = async () => {
+      try {
+        if (!user) { setWishlistedTitles(new Set()); return; }
+        const raw = await AsyncStorage.getItem(wishlistKey);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) arr.forEach(t => wl.add(normalize(t)));
+        }
+      } catch {}
+      setWishlistedTitles(wl);
+    };
+    loadLocal();
+  }, [user]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setWishlistedTitles(new Set());
+    }
+  }, [isAuthenticated]);
+
+  const toggleWishlist = async (title) => {
+    const t = normalize(title);
+    const next = new Set(wishlistedTitles);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    setWishlistedTitles(next);
+    try { await AsyncStorage.setItem(wishlistKey, JSON.stringify(Array.from(next))); } catch {}
+  };
 
   const renderBookItem = ({ item }) => (
     <TouchableOpacity
@@ -238,15 +268,13 @@ const LibraryScreen = ({ navigation }) => {
             <Text style={styles.ratingStars}>⭐⭐⭐⭐⭐</Text>
             <Text style={styles.ratingText}>4.{item.id}</Text>
           </View>
-          
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>Disponível</Text>
-          </View>
         </View>
       </View>
       
-      <TouchableOpacity style={styles.favoriteButton}>
-        <Text style={styles.favoriteIcon}>🤍</Text>
+      <TouchableOpacity style={styles.favoriteButton} onPress={() => toggleWishlist(item.title)}>
+        <Text style={[styles.favoriteIcon, { color: wishlistedTitles.has(normalize(item.title)) ? COLORS.primary : COLORS.textSecondary }]}>
+          {wishlistedTitles.has(normalize(item.title)) ? '❤️' : '🤍'}
+        </Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -286,8 +314,10 @@ const LibraryScreen = ({ navigation }) => {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.favoriteButton}>
-        <Text style={styles.favoriteIcon}>🤍</Text>
+      <TouchableOpacity style={styles.favoriteButton} onPress={() => toggleWishlist(item.title)}>
+        <Text style={[styles.favoriteIcon, { color: wishlistedTitles.has(normalize(item.title)) ? COLORS.primary : COLORS.textSecondary }]}>
+          {wishlistedTitles.has(normalize(item.title)) ? '❤️' : '🤍'}
+        </Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -354,23 +384,7 @@ const LibraryScreen = ({ navigation }) => {
 
       
 
-      {/* Switch Library/Explore */}
-      <View style={[styles.viewSwitchContainer, ui.screenPadding]}>
-        <View style={styles.viewSwitch}>
-          <TouchableOpacity
-            style={[styles.viewSwitchBtn, viewMode === 'library' && styles.viewSwitchBtnActive]}
-            onPress={() => setViewMode('library')}
-          >
-            <Text style={[styles.viewSwitchText, viewMode === 'library' && styles.viewSwitchTextActive]}>Minha Biblioteca</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.viewSwitchBtn, viewMode === 'explore' && styles.viewSwitchBtnActive]}
-            onPress={() => setViewMode('explore')}
-          >
-            <Text style={[styles.viewSwitchText, viewMode === 'explore' && styles.viewSwitchTextActive]}>Explorar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      
 
       {/* Books List */}
       <View style={styles.booksContainer}>
@@ -400,10 +414,6 @@ const LibraryScreen = ({ navigation }) => {
           <>
             <View style={[styles.booksHeader, ui.screenPadding]}>
               <Text style={styles.booksCount}>{searchResults?.length || 0} livros encontrados</Text>
-              <TouchableOpacity style={styles.sortButton}>
-                <Text style={styles.sortIcon}>⚡</Text>
-                <Text style={styles.sortText}>Ordenar</Text>
-              </TouchableOpacity>
             </View>
             {loadingSearch ? (
               <View style={styles.loadingContainer}>
@@ -543,6 +553,7 @@ const styles = StyleSheet.create({
   booksCount: {
     fontSize: SIZES.fontSize.sm,
     color: COLORS.textSecondary,
+    lineHeight: 18,
   },
   sortButton: {
     flexDirection: 'row',
@@ -560,12 +571,15 @@ const styles = StyleSheet.create({
   booksListContent: {
     paddingHorizontal: SIZES.lg,
     paddingBottom: SIZES.xl,
+    rowGap: SIZES.md,
   },
   bookItem: {
     flexDirection: 'row',
     backgroundColor: COLORS.white,
-    borderRadius: SIZES.radius.md,
-    padding: SIZES.md,
+    borderRadius: SIZES.radius.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
+    alignItems: 'center',
     ...SHADOWS.light,
   },
   bookSeparator: {
@@ -579,6 +593,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: SIZES.md,
+    ...SHADOWS.light,
   },
   bookCoverText: {
     fontSize: 24,
@@ -615,11 +630,13 @@ const styles = StyleSheet.create({
     fontWeight: FONTS.weights.semiBold,
     color: COLORS.text,
     marginBottom: SIZES.xs,
+    lineHeight: 20,
   },
   bookAuthor: {
     fontSize: SIZES.fontSize.sm,
     color: COLORS.textSecondary,
     marginBottom: SIZES.xs,
+    lineHeight: 18,
   },
   bookGenre: {
     fontSize: SIZES.fontSize.sm,
@@ -657,9 +674,10 @@ const styles = StyleSheet.create({
   },
   favoriteButton: {
     padding: SIZES.sm,
+    marginLeft: SIZES.sm,
   },
   favoriteIcon: {
-    fontSize: 20,
+    fontSize: 22,
   },
 });
 

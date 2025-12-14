@@ -5,7 +5,9 @@ import { useDispatch, useSelector } from 'react-redux';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
 import { COLORS, SIZES } from '../constants';
-import { loadUserFromStorage } from '../store/slices/authSlice';
+import { loadUserFromStorage, logoutUser } from '../store/slices/authSlice';
+import { userAPI } from '../services/api';
+import { CommonActions } from '@react-navigation/native';
 
 // Import navigators
 import AuthNavigator from './AuthNavigator';
@@ -40,6 +42,21 @@ const AppNavigator = () => {
     // Check if user is already logged in when app starts
     dispatch(loadUserFromStorage());
   }, [dispatch]);
+
+  useEffect(() => {
+    const verify = async () => {
+      if (isAuthenticated && user) {
+        try {
+          const res = await userAPI.getProfile();
+          const valid = !!(res?.data?.user && (res.data.user._id || res.data.user.id || res.data.user.userId));
+          if (!valid) throw new Error('invalid');
+        } catch (e) {
+          await dispatch(logoutUser());
+        }
+      }
+    };
+    verify();
+  }, [isAuthenticated, user, dispatch]);
 
   // Show loading screen while checking authentication
   if (isLoading) {

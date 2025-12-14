@@ -25,15 +25,18 @@ const ReadingGoalsScreen = ({ navigation }) => {
   const scrollRef = useRef(null);
   const [localGoals, setLocalGoals] = useState([]);
   const [pendingGoalId, setPendingGoalId] = useState(null);
-  const userId = user?._id || user?.id || user?.userId || 'anonymous';
-  const cacheKey = `userGoals:${userId}`;
+  const userId = user?._id || user?.id || user?.userId || user?.email;
+  const cacheKey = userId ? `userGoals:${userId}` : null;
   const [goalBaselines, setGoalBaselines] = useState({});
   const [goalLastProgress, setGoalLastProgress] = useState({});
-  const baselineKeyFor = (id) => `goalBaseline:${userId}:${id}`;
-  const lastKeyFor = (id) => `goalLastProgress:${userId}:${id}`;
+  const baselineKeyFor = (id) => (userId ? `goalBaseline:${userId}:${id}` : null);
+  const lastKeyFor = (id) => (userId ? `goalLastProgress:${userId}:${id}` : null);
+  const createdListKey = userId ? `goalCreatedList:${userId}` : null;
+  const [createdList, setCreatedList] = useState([]);
 
   const loadCachedGoals = async () => {
     try {
+      if (!cacheKey) return;
       const raw = await AsyncStorage.getItem(cacheKey);
       if (raw) {
         const arr = JSON.parse(raw);
@@ -43,6 +46,7 @@ const ReadingGoalsScreen = ({ navigation }) => {
   };
   const saveCachedGoals = async (arr) => {
     try {
+      if (!cacheKey) return;
       await AsyncStorage.setItem(cacheKey, JSON.stringify(arr));
     } catch (e) {}
   };
@@ -52,7 +56,9 @@ const ReadingGoalsScreen = ({ navigation }) => {
       const result = {};
       for (const g of entries) {
         const id = g._id || g.id; if (!id) continue;
-        const raw = await AsyncStorage.getItem(baselineKeyFor(id));
+        const key = baselineKeyFor(id);
+        if (!key) continue;
+        const raw = await AsyncStorage.getItem(key);
         if (raw) { try { result[id] = JSON.parse(raw); } catch {} }
       }
       setGoalBaselines(result);
@@ -64,7 +70,9 @@ const ReadingGoalsScreen = ({ navigation }) => {
       const result = {};
       for (const g of entries) {
         const id = g._id || g.id; if (!id) continue;
-        const raw = await AsyncStorage.getItem(lastKeyFor(id));
+        const key = lastKeyFor(id);
+        if (!key) continue;
+        const raw = await AsyncStorage.getItem(key);
         if (raw) { try { const num = JSON.parse(raw); if (typeof num === 'number') result[id] = num; } catch {} }
       }
       setGoalLastProgress(result);
@@ -82,24 +90,49 @@ const ReadingGoalsScreen = ({ navigation }) => {
       setGoalBaselines((prev) => ({ ...prev, [id]: obj }));
     } catch {}
   };
+  const addCreatedRecord = async (id) => {
+    try {
+      const ts = Date.now();
+      const next = [...createdList.filter(x => x && x.id), { id, ts }];
+      setCreatedList(next);
+      await AsyncStorage.setItem(createdListKey, JSON.stringify(next));
+    } catch {}
+  };
+  const loadCreatedRecords = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(createdListKey);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) setCreatedList(arr);
+      }
+    } catch {}
+  };
 
   const displayGoals = useMemo(() => {
     const baseGoals = Array.isArray(goals) ? goals : [];
     return [...localGoals.filter(lg => !baseGoals.some(bg => bg._id === lg._id)), ...baseGoals];
   }, [localGoals, goals]);
   useEffect(() => {
+    setLocalGoals([]);
+    setGoalBaselines({});
+    setGoalLastProgress({});
+    setCreatedList([]);
+  }, [userId]);
+  useEffect(() => {
     const run = async () => {
-      const key = `alertedGoals:${userId}`;
+      const key = userId ? `alertedGoals:${userId}` : null;
       let alerted = [];
       try {
-        const raw = await AsyncStorage.getItem(key);
-        if (raw) {
-          const arr = JSON.parse(raw);
-          if (Array.isArray(arr)) alerted = arr;
+        if (key) {
+          const raw = await AsyncStorage.getItem(key);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) alerted = arr;
+          }
         }
       } catch {}
       const next = [...alerted];
-      displayGoals.forEach(g => {
+      displayGoals.forEach(async g => {
         const id = g._id || g.id;
         const base = id ? goalBaselines[id] : undefined;
         let currentVal = g.current || 0;
@@ -108,7 +141,8 @@ const ReadingGoalsScreen = ({ navigation }) => {
           if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
           if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
         }
-        const last = id ? goalLastProgress[id] : undefined;
+        let last = id ? goalLastProgress[id] : undefined;
+        if (last === undefined && base) last = 0;
         const target = g.target || 0;
         const justCompleted = typeof last === 'number' && last < target && currentVal >= target && currentVal > last && g.active !== false;
         if (justCompleted && id && !next.includes(id)) {
@@ -116,20 +150,22 @@ const ReadingGoalsScreen = ({ navigation }) => {
           next.push(id);
         }
       });
-      try { await AsyncStorage.setItem(key, JSON.stringify(next)); } catch {}
+      if (key) { try { await AsyncStorage.setItem(key, JSON.stringify(next)); } catch {} }
     };
     run();
-  }, [displayGoals, stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks]);
+  }, [displayGoals, stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks, userId]);
 
   useEffect(() => {
     const run = async () => {
-      const key = `alertedBuiltins:${userId}`;
+      const key = userId ? `alertedBuiltins:${userId}` : null;
       let alerted = {};
       try {
-        const raw = await AsyncStorage.getItem(key);
-        if (raw) {
-          const obj = JSON.parse(raw);
-          if (obj && typeof obj === 'object') alerted = obj;
+        if (key) {
+          const raw = await AsyncStorage.getItem(key);
+          if (raw) {
+            const obj = JSON.parse(raw);
+            if (obj && typeof obj === 'object') alerted = obj;
+          }
         }
       } catch {}
       const dailyPct2 = Math.min(100, Math.round(((stats?.goalsProgress?.dailyMinutes || 0) / (stats?.readingGoals?.daily || 1)) * 100));
@@ -139,10 +175,10 @@ const ReadingGoalsScreen = ({ navigation }) => {
       if (dailyPct2 >= 100 && !alerted.daily) { Alert.alert('Meta diária concluída', 'Parabéns!'); alerted.daily = true; changed = true; }
       if (weeklyPct2 >= 100 && !alerted.weekly) { Alert.alert('Meta semanal concluída', 'Parabéns!'); alerted.weekly = true; changed = true; }
       if (monthlyPct2 >= 100 && !alerted.monthly) { Alert.alert('Meta mensal concluída', 'Parabéns!'); alerted.monthly = true; changed = true; }
-      if (changed) { try { await AsyncStorage.setItem(key, JSON.stringify(alerted)); } catch {} }
+      if (changed && key) { try { await AsyncStorage.setItem(key, JSON.stringify(alerted)); } catch {} }
     };
     run();
-  }, [stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks, stats?.readingGoals?.daily, stats?.readingGoals?.weekly, stats?.readingGoals?.monthly]);
+  }, [stats?.goalsProgress?.dailyMinutes, stats?.goalsProgress?.weeklyBooks, stats?.goalsProgress?.monthlyBooks, stats?.readingGoals?.daily, stats?.readingGoals?.weekly, stats?.readingGoals?.monthly, userId]);
 
   useEffect(() => {
     if (Array.isArray(displayGoals) && displayGoals.length > 0) {
@@ -150,6 +186,7 @@ const ReadingGoalsScreen = ({ navigation }) => {
     }
   }, [goals, localGoals]);
   useEffect(() => { loadBaselines(displayGoals); loadLastProgress(displayGoals); }, [displayGoals]);
+  useEffect(() => { loadCreatedRecords(); }, []);
   const [daily, setDaily] = useState(String(stats?.readingGoals?.daily || 30));
   const [weekly, setWeekly] = useState(String(stats?.readingGoals?.weekly || 3));
   const [monthly, setMonthly] = useState(String(stats?.readingGoals?.monthly || 12));
@@ -233,6 +270,7 @@ const ReadingGoalsScreen = ({ navigation }) => {
             return nextList;
           });
           await saveBaselineFor(created._id || created.id);
+          await addCreatedRecord(created._id || created.id);
           setPendingGoalId(null);
         }
         dispatch(fetchUserGoals());
@@ -435,7 +473,7 @@ const ReadingGoalsScreen = ({ navigation }) => {
                 displayGoals.map(g => {
                   const id = g._id || g.id;
                   const base = id ? goalBaselines[id] : undefined;
-                  let currentVal = g.current || 0;
+                  let currentVal = (g.current !== undefined && g.current !== null) ? g.current : 0;
                   if (base) {
                     if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
                     if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
@@ -444,10 +482,10 @@ const ReadingGoalsScreen = ({ navigation }) => {
                   const last = id ? goalLastProgress[id] : undefined;
                   const pct = g.target > 0 ? Math.min(100, Math.round(((currentVal) / g.target) * 100)) : 0;
                   try { if (id) AsyncStorage.setItem(lastKeyFor(id), JSON.stringify(currentVal)); } catch {}
-                  return (
+                  return (pct < 100) ? (
                     <View key={g._id} style={{ marginTop: SIZES.sm }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text style={styles.goalTitle}>{g.title}</Text>
+                        <Text style={styles.goalTitle} numberOfLines={1} ellipsizeMode="tail">{g.title}</Text>
                         <View style={{ flexDirection: 'row' }}>
                           <TouchableOpacity onPress={() => toggleActive(g._id, g.active)} style={{ marginRight: SIZES.sm }}>
                             <Text style={styles.progressSub}>{g.active ? 'Desativar' : 'Ativar'}</Text>
@@ -459,8 +497,53 @@ const ReadingGoalsScreen = ({ navigation }) => {
                       </View>
                       <Text style={styles.progressSub}>{currentVal} / {g.target} {g.type === 'minutes' ? 'min' : 'livros'} ({periodPt(g.period)})</Text>
                       <View style={styles.progressBar}><View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: COLORS.primary }]} /></View>
-                      {pct >= 100 && (<Text style={styles.progressSub}>Concluída</Text>)}
-                      {(g.createdAt && (Date.now() - new Date(g.createdAt).getTime()) < 5 * 60 * 1000) && (<Text style={styles.progressSub}>Meta criada</Text>)}
+                      {(() => {
+                        const createdMs = g.createdAt ? new Date(g.createdAt).getTime() : (base?.createdAt ? base.createdAt : undefined);
+                        const isNewBackend = createdMs ? ((Date.now() - createdMs) < 5 * 60 * 1000) : false;
+                        const isNewLocal = Array.isArray(createdList) && !!createdList.find(x => x.id === (g._id || g.id) && ((Date.now() - x.ts) < 5 * 60 * 1000));
+                        const show = isNewBackend || isNewLocal;
+                        return show ? (<Text style={styles.progressSub}>Meta criada</Text>) : null;
+                      })()}
+                    </View>
+                  ) : null;
+                })
+              )}
+            </View>
+          </View>
+
+          <View style={[styles.goalCard, ui.card]}>
+            <Text style={styles.goalTitle}>Metas concluídas</Text>
+            <View>
+              {displayGoals.filter(g => {
+                const id = g._id || g.id; const base = goalBaselines[id];
+                let currentVal = (g.current !== undefined && g.current !== null) ? g.current : 0;
+                if (base) {
+                  if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
+                  if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
+                  if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
+                }
+                const pct = g.target > 0 ? Math.min(100, Math.round(((currentVal) / g.target) * 100)) : 0;
+                return pct >= 100;
+              }).length === 0 ? (
+                <Text style={styles.progressSub}>Nenhuma concluída</Text>
+              ) : (
+                displayGoals.map(g => {
+                  const id = g._id || g.id; const base = goalBaselines[id];
+                  let currentVal = (g.current !== undefined && g.current !== null) ? g.current : 0;
+                  if (base) {
+                    if (g.type === 'minutes' && g.period === 'day') currentVal = Math.max(0, (stats?.goalsProgress?.dailyMinutes || 0) - (base.dailyMinutes || 0));
+                    if (g.type === 'books' && g.period === 'week') currentVal = Math.max(0, (stats?.goalsProgress?.weeklyBooks || 0) - (base.weeklyBooks || 0));
+                    if (g.type === 'books' && g.period === 'month') currentVal = Math.max(0, (stats?.goalsProgress?.monthlyBooks || 0) - (base.monthlyBooks || 0));
+                  }
+                  const pct = g.target > 0 ? Math.min(100, Math.round(((currentVal) / g.target) * 100)) : 0;
+                  if (pct < 100) return null;
+                  return (
+                    <View key={`done-${g._id}`} style={{ marginTop: SIZES.sm }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={styles.goalTitle} numberOfLines={1} ellipsizeMode="tail">{g.title}</Text>
+                        <Text style={styles.progressSub}>Concluída</Text>
+                      </View>
+                      <Text style={styles.progressSub}>{g.type === 'minutes' ? 'Minutos' : 'Livros'} ({periodPt(g.period)})</Text>
                     </View>
                   );
                 })
@@ -548,8 +631,9 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    padding: SIZES.lg,
+    justifyContent: 'space-between',
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     marginBottom: SIZES.xl,
     ...SHADOWS.medium,
   },
@@ -570,8 +654,9 @@ const styles = StyleSheet.create({
   goalsSection: {},
   goalCard: {
     backgroundColor: COLORS.white,
-    borderRadius: SIZES.radius.md,
-    padding: SIZES.md,
+    borderRadius: SIZES.radius.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     marginBottom: SIZES.md,
     ...SHADOWS.light,
   },
@@ -592,6 +677,7 @@ const styles = StyleSheet.create({
     fontWeight: FONTS.weights.semiBold,
     color: COLORS.text,
     marginBottom: SIZES.xs,
+    flexShrink: 1,
   },
   goalSubtitle: {
     fontSize: SIZES.fontSize.sm,
@@ -610,7 +696,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.gray[300],
     borderRadius: SIZES.radius.md,
-    padding: SIZES.sm,
+    paddingVertical: SIZES.sm,
+    paddingHorizontal: SIZES.md,
     fontSize: SIZES.fontSize.md,
     color: COLORS.text,
   },
@@ -634,19 +721,20 @@ const styles = StyleSheet.create({
     fontWeight: FONTS.weights.bold,
   },
   progressBar: {
-    height: 8,
+    height: 10,
     backgroundColor: COLORS.gray[200],
-    borderRadius: 4,
+    borderRadius: 5,
     marginBottom: SIZES.sm,
   },
   progressFill: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: 5,
   },
   progressSub: {
     fontSize: SIZES.fontSize.sm,
     color: COLORS.textSecondary,
     marginTop: SIZES.xs,
+    lineHeight: 18,
   },
   emptyState: {
     alignItems: 'center',

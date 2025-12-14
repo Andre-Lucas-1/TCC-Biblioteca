@@ -158,7 +158,15 @@ export const userAPI = {
 // Serviços de Livros
 export const booksAPI = {
   getBooks: async (params = {}) => {
-    const key = `cache:/books:list:${JSON.stringify(params)}`;
+    let uid = 'anonymous';
+    try {
+      const userRaw = await AsyncStorage.getItem('userData');
+      if (userRaw) {
+        const u = JSON.parse(userRaw);
+        uid = u?._id || u?.id || u?.userId || uid;
+      }
+    } catch {}
+    const key = `cache:/users/${uid}/books:list:${JSON.stringify(params)}`;
     try {
       const res = await api.get('/books', { params });
       try { await AsyncStorage.setItem(key, JSON.stringify(res.data)); } catch {}

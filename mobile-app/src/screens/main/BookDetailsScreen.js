@@ -57,27 +57,21 @@ const BookDetailsScreen = ({ navigation, route }) => {
       const existing = books.find(
         (b) => b.externalId === book.id || b.title === book.title || (book.isbn && b.isbn === book.isbn)
       );
-      if (existing) {
-        const targetId = existing._id || existing.id;
-        navigation.navigate('ChaptersList', {
-          bookId: targetId,
-          bookTitle: existing.title || book.title,
-        });
-        return;
+      let targetId = existing?._id || existing?.id;
+      if (!targetId) {
+        const result = await gutendexAPI.import(book.id);
+        const added = result?.book;
+        targetId = added?._id;
+        if (!targetId) {
+          Alert.alert('Erro', 'Falha ao importar livro');
+          return;
+        }
       }
 
-      const result = await gutendexAPI.import(book.id);
-      const added = result?.book;
-      const targetId = added?._id;
+      try { await dispatch(startReading(targetId)); } catch {}
+      
 
-      if (targetId) {
-        navigation.navigate('ChaptersList', {
-          bookId: targetId,
-          bookTitle: added?.title || book.title,
-        });
-      } else {
-        Alert.alert('Erro', 'Falha ao importar livro');
-      }
+      navigation.navigate('MainTabs', { screen: 'Reading' });
     } catch (error) {
       const status = error?.response?.status;
       const msg = error?.response?.data?.message;
@@ -122,7 +116,7 @@ const BookDetailsScreen = ({ navigation, route }) => {
       if (first?._id) {
         navigation.navigate('ReadingScreen', { bookId: targetId, chapterId: first._id, bookTitle: book.title });
       } else {
-        navigation.navigate('ChaptersList', { bookId: targetId, bookTitle: book.title });
+        Alert.alert('Capítulos indisponíveis', 'Não há capítulos disponíveis para leitura');
       }
     } catch (error) {
       const status = error?.response?.status;
@@ -213,11 +207,11 @@ const BookDetailsScreen = ({ navigation, route }) => {
           </View>
           
           <View style={styles.bookBasicInfo}>
-            <Text style={styles.bookTitle}>{book.title}</Text>
-            <Text style={styles.bookAuthor}>
+            <Text style={styles.bookTitle} numberOfLines={2} ellipsizeMode="tail">{book.title}</Text>
+            <Text style={styles.bookAuthor} numberOfLines={1} ellipsizeMode="tail">
               {book.authors?.join(', ') || book.author || 'Autor desconhecido'}
             </Text>
-            <Text style={styles.bookGenre}>
+            <Text style={styles.bookGenre} numberOfLines={1} ellipsizeMode="tail">
               {book.subjects?.[0] || book.genre || 'Gênero não especificado'}
             </Text>
             
@@ -256,25 +250,25 @@ const BookDetailsScreen = ({ navigation, route }) => {
           
           {book.isbn && (
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>ISBN:</Text>
-              <Text style={styles.infoValue}>{book.isbn}</Text>
+              <Text style={styles.infoLabel} numberOfLines={1}>ISBN:</Text>
+              <Text style={styles.infoValue} numberOfLines={1} ellipsizeMode="tail">{book.isbn}</Text>
             </View>
           )}
           
           {book.subjects && book.subjects.length > 0 && (
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Categorias:</Text>
-              <Text style={styles.infoValue}>{book.subjects.slice(0, 3).join(', ')}</Text>
+              <Text style={styles.infoLabel} numberOfLines={1}>Categorias:</Text>
+              <Text style={styles.infoValue} numberOfLines={1} ellipsizeMode="tail">{book.subjects.slice(0, 3).join(', ')}</Text>
             </View>
           )}
           
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Fonte:</Text>
-            <Text style={styles.infoValue}>
-              {book.source === 'openLibrary' ? 'Open Library' : 
-               book.source === 'googleBooks' ? 'Google Books' : 'Externa'}
-            </Text>
-          </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel} numberOfLines={1}>Fonte:</Text>
+              <Text style={styles.infoValue} numberOfLines={1} ellipsizeMode="tail">
+                {book.source === 'openLibrary' ? 'Open Library' : 
+                 book.source === 'googleBooks' ? 'Google Books' : 'Externa'}
+              </Text>
+            </View>
         </View>
       </ScrollView>
 
@@ -328,7 +322,7 @@ const BookDetailsScreen = ({ navigation, route }) => {
           }}
         >
           <Text style={styles.actionButtonIcon}>📑</Text>
-          <Text style={styles.actionButtonText}>Ver Capítulos</Text>
+          <Text style={[styles.actionButtonText, styles.viewChaptersText]}>Ver Capítulos</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -401,7 +395,8 @@ const styles = StyleSheet.create({
   },
   bookHeader: {
     flexDirection: 'row',
-    padding: SIZES.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     backgroundColor: COLORS.white,
     marginBottom: SIZES.md,
   },
@@ -433,12 +428,14 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontSize.xl,
     fontWeight: FONTS.weights.bold,
     color: COLORS.text,
-    marginBottom: SIZES.sm,
+    marginBottom: SIZES.xs,
+    lineHeight: 24,
   },
   bookAuthor: {
     fontSize: SIZES.fontSize.lg,
     color: COLORS.textSecondary,
-    marginBottom: SIZES.sm,
+    marginBottom: SIZES.xs,
+    lineHeight: 22,
   },
   bookGenre: {
     fontSize: SIZES.fontSize.md,
@@ -468,7 +465,8 @@ const styles = StyleSheet.create({
   },
   section: {
     backgroundColor: COLORS.white,
-    padding: SIZES.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     marginBottom: SIZES.md,
   },
   sectionTitle: {
@@ -499,7 +497,8 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: 'row',
-    padding: SIZES.lg,
+    paddingVertical: SIZES.md,
+    paddingHorizontal: SIZES.lg,
     backgroundColor: COLORS.white,
     ...SHADOWS.light,
   },
@@ -509,14 +508,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: SIZES.md,
-    borderRadius: SIZES.radius.md,
+    borderRadius: SIZES.radius.lg,
     marginHorizontal: SIZES.xs,
+    ...SHADOWS.light,
   },
   addToLibraryButton: {
     backgroundColor: COLORS.secondary,
   },
   startReadingButton: {
     backgroundColor: COLORS.primary,
+  },
+  viewChaptersButton: {
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
   },
   actionButtonIcon: {
     fontSize: 20,
@@ -526,6 +531,9 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontSize.md,
     fontWeight: FONTS.weights.semiBold,
     color: COLORS.white,
+  },
+  viewChaptersText: {
+    color: COLORS.primary,
   },
 });
 

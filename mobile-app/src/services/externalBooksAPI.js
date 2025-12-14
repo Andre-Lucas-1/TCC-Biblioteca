@@ -2,6 +2,50 @@ import api from './api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const lastSearchAt = new Map();
+const inflight = new Map();
+
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+const isRetriable = (err) => {
+  const status = err?.response?.status;
+  const msg = (err?.message || '').toLowerCase();
+  return status === 429 || status === 500 || msg.includes('socket hang up') || msg.includes('network');
+};
+
+const getWithRetry = async (url, options = {}, retries = 2) => {
+  let attempt = 0;
+  let lastErr;
+  while (attempt <= retries) {
+    try {
+      const res = await api.get(url, options);
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (!isRetriable(e) || attempt === retries) break;
+      const backoff = 500 * Math.pow(3, attempt);
+      await sleep(backoff);
+      attempt += 1;
+    }
+  }
+  throw lastErr;
+};
+
+const postWithRetry = async (url, data = {}, options = {}, retries = 1) => {
+  let attempt = 0;
+  let lastErr;
+  while (attempt <= retries) {
+    try {
+      const res = await api.post(url, data, options);
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (!isRetriable(e) || attempt === retries) break;
+      const backoff = 500 * Math.pow(3, attempt);
+      await sleep(backoff);
+      attempt += 1;
+    }
+  }
+  throw lastErr;
+};
 
 export const gutendexAPI = {
   search: async (query = '', page = 1) => {
@@ -15,10 +59,34 @@ export const gutendexAPI = {
         if (raw) return JSON.parse(raw);
       } catch {}
     }
+    if (inflight.has(cacheKey)) {
+      try { return await inflight.get(cacheKey); } catch {}
+    }
+    const promise = (async () => {
+      try {
+        const response = await getWithRetry('/books/external/search', { params: { query: q, page } }, 2);
+        const data = response.data;
+        lastSearchAt.set(cacheKey, Date.now());
+        try { await AsyncStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+        return data;
+      } catch (e) {
+        try {
+          const raw = await AsyncStorage.getItem(cacheKey);
+          if (raw) return JSON.parse(raw);
+        } catch {}
+        return { books: [], pagination: { page: 1, hasNext: false } };
+      } finally {
+        inflight.delete(cacheKey);
+      }
+    })();
+    inflight.set(cacheKey, promise);
+    return await promise;
+  },
+  details: async (id) => {
+    const cacheKey = `cache:/books/external/details:${id}`;
     try {
-      const response = await api.get('/books/external/search', { params: { query: q, page } });
+      const response = await getWithRetry(`/books/external/${id}`, {}, 2);
       const data = response.data;
-      lastSearchAt.set(cacheKey, Date.now());
       try { await AsyncStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
       return data;
     } catch (e) {
@@ -26,19 +94,15 @@ export const gutendexAPI = {
         const raw = await AsyncStorage.getItem(cacheKey);
         if (raw) return JSON.parse(raw);
       } catch {}
-      throw e;
+      return { book: { externalId: id, title: 'Título não disponível', authors: [], description: 'Descrição não disponível', coverImage: '', pageCount: 0, subjects: [], languages: ['pt'], source: 'gutendex' } };
     }
   },
-  details: async (id) => {
-    const response = await api.get(`/books/external/${id}`);
-    return response.data;
-  },
   import: async (id) => {
-    const response = await api.post(`/books/external/import/${id}`);
+    const response = await postWithRetry(`/books/external/import/${id}`, {}, {}, 1);
     return response.data;
   },
   content: async (id) => {
-    const response = await api.get(`/books/external/${id}/content`, { responseType: 'text' });
+    const response = await getWithRetry(`/books/external/${id}/content`, { responseType: 'text' }, 1);
     return response.data;
   },
 };
